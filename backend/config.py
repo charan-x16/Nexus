@@ -21,7 +21,7 @@ class Settings(BaseSettings):
         min_length=1,
     )
     LANGSMITH_API_KEY: SecretStr | None = None
-    LANGSMITH_PROJECT: str = Field(default="nexus-phase1", min_length=1)
+    LANGSMITH_PROJECT: str = Field(default="nexus-phase5", min_length=1)
     ENVIRONMENT: str = Field(default="development", min_length=1)
 
     model_config = SettingsConfigDict(

@@ -83,7 +83,11 @@ async def parallel_research_node(state: WorkflowState) -> WorkflowState:
     lock = asyncio.Lock()
 
     async def run_one_task(task: ResearchTask) -> list[ResearchResult]:
-        agent = ResearchAgent(goal=goal, memory_context=memory_context)
+        agent = ResearchAgent(
+            goal=goal,
+            memory_context=memory_context,
+            run_id=state.get("run_id"),
+        )
         results = await agent.run(task)
         async with lock:
             collected.extend(results)
@@ -150,7 +154,11 @@ async def targeted_research_node(state: WorkflowState) -> WorkflowState:
     memory_context = state.get("memory_context", "")
 
     async def run_targeted(task: ResearchTask) -> list[ResearchResult]:
-        agent = ResearchAgent(goal=goal, memory_context=memory_context)
+        agent = ResearchAgent(
+            goal=goal,
+            memory_context=memory_context,
+            run_id=state.get("run_id"),
+        )
         return await agent.targeted_research(task, high_severity_findings)
 
     task_results = await asyncio.gather(

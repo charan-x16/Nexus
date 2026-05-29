@@ -38,7 +38,7 @@ services:
     working_dir: /app
     command: >
       sh -c "pip install --no-cache-dir -r requirements.txt &&
-             streamlit run frontend/app.py --server.address 0.0.0.0 --server.port 8501"
+             streamlit run frontend/dashboard.py --server.address 0.0.0.0 --server.port 8501"
     env_file:
       - .env
     environment:

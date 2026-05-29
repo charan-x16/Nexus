@@ -70,6 +70,7 @@ class MemoryAgent(BaseAgent):
             ],
             max_tokens=350,
             temperature=0.1,
+            run_id=run_id,
         )
         summary_text = f"{label}: {summary.strip()}"
         embedding = await embed_single(summary_text)

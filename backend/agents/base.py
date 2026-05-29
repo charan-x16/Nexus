@@ -6,7 +6,11 @@ import httpx
 from langsmith import traceable
 
 from backend.config import settings
-from backend.observability.token_tracker import TokenUsage, track_token_usage
+from backend.observability.token_tracker import (
+    TokenUsage,
+    token_tracker,
+    track_token_usage,
+)
 from backend.schemas.workflow import WorkflowState
 
 
@@ -26,6 +30,7 @@ class BaseAgent(ABC):
         *,
         max_tokens: int = 2000,
         temperature: float = 0.2,
+        run_id: str | None = None,
     ) -> str:
         api_key = (
             settings.OPENROUTER_API_KEY.get_secret_value()
@@ -75,6 +80,13 @@ class BaseAgent(ABC):
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
             )
+        )
+        await token_tracker.record(
+            run_id=run_id,
+            agent_name=self.__class__.__name__,
+            model=self.model_name,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )
 
         choices = response_data.get("choices") or []

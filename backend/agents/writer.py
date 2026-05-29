@@ -42,6 +42,7 @@ class WriterAgent(BaseAgent):
             [_writer_prompt(state, plan, research_results, critic_reports)],
             max_tokens=4500,
             temperature=0.15,
+            run_id=state.get("run_id"),
         )
         report = await self._parse_with_single_retry(
             state,
@@ -78,6 +79,7 @@ class WriterAgent(BaseAgent):
                 ],
                 max_tokens=4500,
                 temperature=0.0,
+                run_id=state.get("run_id"),
             )
             return FinalReport.model_validate(_parse_json_object(retry_text))
 

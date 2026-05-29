@@ -4,12 +4,13 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import asyncpg
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
 from langgraph.types import Command
 
 from backend.db.connection import execute_query, fetch_rows, get_pool
 from backend.graphs.research_graph import get_compiled_graph
+from backend.observability.cost_estimator import estimate_workflow_cost
 from backend.schemas.api import (
     WorkflowCreateRequest,
     WorkflowCreateResponse,
@@ -26,6 +27,7 @@ from backend.schemas.workflow import (
     serialize_workflow_state,
 )
 from backend.agents.writer import render_final_report_markdown
+from backend.tasks.background_runner import workflow_runner
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
 
@@ -97,10 +99,12 @@ async def create_workflow(
         state["status"] = "awaiting_approval"
         state["awaiting_approval"] = True
         await _update_workflow_status(run_id, "awaiting_approval", state)
+        plan = _coerce_plan(state.get("plan"))
         return WorkflowCreateResponse(
             run_id=run_id,
             status="awaiting_approval",
-            plan=_coerce_plan(state.get("plan")),
+            plan=plan,
+            cost_estimate=estimate_workflow_cost(plan) if plan is not None else None,
             output=None,
         )
     except Exception as exc:
@@ -115,7 +119,6 @@ async def create_workflow(
 @router.post("/{run_id}/approve", response_model=WorkflowDecisionResponse)
 async def approve_workflow(
     run_id: UUID,
-    background_tasks: BackgroundTasks,
     _pool: asyncpg.Pool = Depends(get_pool),
 ) -> WorkflowDecisionResponse:
     state = await _load_state(run_id)
@@ -128,8 +131,22 @@ async def approve_workflow(
     state["awaiting_approval"] = False
     state["status"] = "researching"
     await _update_workflow_status(run_id, "researching", state)
-    background_tasks.add_task(_resume_approved_workflow, run_id)
+    await workflow_runner.submit(
+        run_id=str(run_id),
+        goal=state.get("goal", ""),
+        project_id=state.get("project_id", ""),
+    )
     return WorkflowDecisionResponse(run_id=run_id, status="researching")
+
+
+@router.post("/{run_id}/cancel", response_model=WorkflowDecisionResponse)
+async def cancel_workflow(
+    run_id: UUID,
+    _pool: asyncpg.Pool = Depends(get_pool),
+) -> WorkflowDecisionResponse:
+    await _load_state(run_id)
+    await workflow_runner.cancel(str(run_id))
+    return WorkflowDecisionResponse(run_id=run_id, status="cancelled")
 
 
 @router.post("/{run_id}/reject", response_model=WorkflowDecisionResponse)

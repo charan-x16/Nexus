@@ -32,8 +32,13 @@ class PlannerAgent(BaseAgent):
             [_planner_prompt(goal)],
             max_tokens=1800,
             temperature=0.1,
+            run_id=state.get("run_id"),
         )
-        plan = await self._parse_with_single_retry(goal, response_text)
+        plan = await self._parse_with_single_retry(
+            goal=goal,
+            response_text=response_text,
+            run_id=state.get("run_id"),
+        )
 
         messages = list(state.get("messages", []))
         messages.append(
@@ -51,7 +56,12 @@ class PlannerAgent(BaseAgent):
         updated_state["status"] = "awaiting_approval"
         return updated_state
 
-    async def _parse_with_single_retry(self, goal: str, response_text: str) -> WorkflowPlan:
+    async def _parse_with_single_retry(
+        self,
+        goal: str,
+        response_text: str,
+        run_id: str | None,
+    ) -> WorkflowPlan:
         try:
             return WorkflowPlan.model_validate(_parse_json_object(response_text))
         except (json.JSONDecodeError, ValueError, ValidationError) as exc:
@@ -69,6 +79,7 @@ class PlannerAgent(BaseAgent):
                 ],
                 max_tokens=1800,
                 temperature=0.0,
+                run_id=run_id,
             )
             return WorkflowPlan.model_validate(_parse_json_object(retry_text))
 

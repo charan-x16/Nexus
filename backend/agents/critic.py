@@ -36,6 +36,7 @@ class CriticAgent(BaseAgent):
             [_critic_prompt(state, iteration)],
             max_tokens=1800,
             temperature=0.0,
+            run_id=state.get("run_id"),
         )
         report = await self._parse_with_single_retry(state, response_text, iteration)
         report = _normalize_report(report)
@@ -68,6 +69,7 @@ class CriticAgent(BaseAgent):
                 ],
                 max_tokens=1800,
                 temperature=0.0,
+                run_id=state.get("run_id"),
             )
             return CriticReport.model_validate(_parse_json_object(retry_text))
 

@@ -33,13 +33,19 @@ RESEARCH_SYSTEM_PROMPT = (
 
 
 class ResearchAgent(BaseAgent):
-    def __init__(self, goal: str = "", memory_context: str = "") -> None:
+    def __init__(
+        self,
+        goal: str = "",
+        memory_context: str = "",
+        run_id: str | None = None,
+    ) -> None:
         super().__init__(
             model_name=settings.OPENROUTER_MODEL,
             system_prompt=RESEARCH_SYSTEM_PROMPT,
         )
         self.goal = goal
         self.memory_context = memory_context
+        self.run_id = run_id
 
     async def tavily_search(self, query: str) -> list[SearchResult]:
         api_key = (
@@ -175,6 +181,7 @@ class ResearchAgent(BaseAgent):
                 ],
                 max_tokens=500,
                 temperature=0.1,
+                run_id=self.run_id,
             )
             parsed = json.loads(response)
             if isinstance(parsed, list):
@@ -241,6 +248,7 @@ class ResearchAgent(BaseAgent):
                 ],
                 max_tokens=20,
                 temperature=0.0,
+                run_id=self.run_id,
             )
             match = re.search(r"\d+(?:\.\d+)?", response)
             if not match:
