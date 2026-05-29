@@ -41,6 +41,7 @@ class WriterAgent(BaseAgent):
             for item in research_values
         ]
         research_context = _format_research_context(research_results)
+        memory_context = state.get("memory_context", "")
 
         final_output = await self._call_model(
             [
@@ -51,6 +52,7 @@ class WriterAgent(BaseAgent):
                         "the plan and available research context.\n\n"
                         f"Goal:\n{goal}\n\n"
                         f"Plan:\n{plan.model_dump_json(indent=2)}\n\n"
+                        f"Relevant project memory:\n{memory_context or 'No stored memory was found.'}\n\n"
                         f"Research context:\n{research_context}"
                     ),
                 }

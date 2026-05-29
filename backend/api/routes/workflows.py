@@ -31,12 +31,14 @@ async def create_workflow(
     request: WorkflowCreateRequest,
     _pool: asyncpg.Pool = Depends(get_pool),
 ) -> WorkflowCreateResponse:
-    project_id = uuid4()
+    project_id = request.project_id or uuid4()
     run_id = uuid4()
     initial_state: WorkflowState = {
+        "project_id": str(project_id),
         "goal": request.goal,
         "plan": None,
         "research_results": [],
+        "memory_context": "",
         "draft": None,
         "final_output": None,
         "messages": [],
@@ -45,15 +47,30 @@ async def create_workflow(
         "awaiting_approval": False,
     }
 
-    await execute_query(
-        """
-        INSERT INTO projects (id, name, goal)
-        VALUES ($1, $2, $3)
-        """,
-        project_id,
-        request.project_name,
-        request.goal,
-    )
+    if request.project_id is None:
+        await execute_query(
+            """
+            INSERT INTO projects (id, name, goal)
+            VALUES ($1, $2, $3)
+            """,
+            project_id,
+            request.project_name,
+            request.goal,
+        )
+    else:
+        rows = await fetch_rows(
+            """
+            SELECT id
+            FROM projects
+            WHERE id = $1
+            """,
+            project_id,
+        )
+        if not rows:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found.",
+            )
     await execute_query(
         """
         INSERT INTO workflow_runs (id, project_id, status, state)

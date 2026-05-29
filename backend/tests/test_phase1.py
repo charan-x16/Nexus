@@ -8,14 +8,18 @@ from backend.agents.planner import PlannerAgent
 from backend.agents.research import ResearchAgent
 from backend.agents.writer import WriterAgent
 from backend.graphs.research_graph import build_graph
+from backend.agents.memory_agent import MemoryAgent
+from backend.memory.store import MemoryStore
 from backend.schemas.workflow import ResearchResult, WorkflowPlan, WorkflowState
 
 
 def sample_state() -> WorkflowState:
     return {
+        "project_id": "00000000-0000-0000-0000-000000000001",
         "goal": "Create a short brief on using pgvector for semantic search.",
         "plan": None,
         "research_results": [],
+        "memory_context": "",
         "draft": None,
         "final_output": None,
         "messages": [],
@@ -135,9 +139,21 @@ async def test_graph_runs_end_to_end_after_mock_approval(
         updated["status"] = "completed"
         return updated
 
+    async def fake_retrieve_context(*args, **kwargs) -> str:
+        return ""
+
+    async def fake_store_research_results(*args, **kwargs) -> None:
+        return None
+
+    async def fake_summarise_and_store(*args, **kwargs) -> None:
+        return None
+
     monkeypatch.setattr(PlannerAgent, "run", fake_planner_run)
     monkeypatch.setattr(ResearchAgent, "run", fake_research_run)
     monkeypatch.setattr(WriterAgent, "run", fake_writer_run)
+    monkeypatch.setattr(MemoryAgent, "retrieve_context", fake_retrieve_context)
+    monkeypatch.setattr(MemoryStore, "store_research_results", fake_store_research_results)
+    monkeypatch.setattr(MemoryAgent, "summarise_and_store", fake_summarise_and_store)
 
     graph = build_graph(MemorySaver())
     config = {"configurable": {"thread_id": "phase1-compat"}}

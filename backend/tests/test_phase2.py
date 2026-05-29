@@ -7,10 +7,12 @@ from langgraph.types import Command
 from pydantic import SecretStr
 
 import backend.agents.research as research_module
+from backend.agents.memory_agent import MemoryAgent
 from backend.agents.planner import PlannerAgent
 from backend.agents.research import ResearchAgent
 from backend.agents.writer import WriterAgent
 from backend.graphs.research_graph import build_graph, parallel_research_node
+from backend.memory.store import MemoryStore
 from backend.schemas.workflow import (
     ResearchResult,
     ResearchTask,
@@ -22,6 +24,7 @@ from backend.schemas.workflow import (
 
 def phase2_state() -> WorkflowState:
     return {
+        "project_id": "00000000-0000-0000-0000-000000000001",
         "goal": "Research LangGraph tutorials.",
         "plan": WorkflowPlan(
             title="LangGraph Research",
@@ -37,6 +40,7 @@ def phase2_state() -> WorkflowState:
             ],
         ),
         "research_results": [],
+        "memory_context": "",
         "draft": None,
         "final_output": None,
         "messages": [],
@@ -142,9 +146,21 @@ async def test_human_approval_interrupt_pauses_and_resumes(
         updated["status"] = "completed"
         return updated
 
+    async def fake_retrieve_context(*args, **kwargs) -> str:
+        return ""
+
+    async def fake_store_research_results(*args, **kwargs) -> None:
+        return None
+
+    async def fake_summarise_and_store(*args, **kwargs) -> None:
+        return None
+
     monkeypatch.setattr(PlannerAgent, "run", fake_planner_run)
     monkeypatch.setattr(ResearchAgent, "run", fake_research_run)
     monkeypatch.setattr(WriterAgent, "run", fake_writer_run)
+    monkeypatch.setattr(MemoryAgent, "retrieve_context", fake_retrieve_context)
+    monkeypatch.setattr(MemoryStore, "store_research_results", fake_store_research_results)
+    monkeypatch.setattr(MemoryAgent, "summarise_and_store", fake_summarise_and_store)
 
     graph = build_graph(MemorySaver())
     config = {"configurable": {"thread_id": "approval-test"}}

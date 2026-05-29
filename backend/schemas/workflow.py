@@ -33,6 +33,13 @@ class ResearchResult(BaseModel):
     relevance_score: float = Field(ge=0, le=10)
 
 
+class MemoryChunk(BaseModel):
+    content: str = Field(min_length=1)
+    source_url: str | None = None
+    score: float = Field(default=0.0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class TaskPlan(BaseModel):
     title: str = Field(min_length=1)
     description: str = Field(min_length=1)
@@ -48,9 +55,11 @@ class AgentMessage(BaseModel):
 
 
 class WorkflowState(TypedDict, total=False):
+    project_id: str
     goal: str
     plan: WorkflowPlan | None
     research_results: list[ResearchResult]
+    memory_context: str
     draft: str | None
     final_output: str | None
     messages: list[AgentMessage]

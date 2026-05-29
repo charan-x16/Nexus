@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.api.routes.projects import router as projects_router
 from backend.api.routes.workflows import router as workflows_router
 from backend.config import settings
 from backend.db.checkpointer import close_checkpointer, setup_checkpointer
@@ -32,6 +33,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(projects_router)
 app.include_router(workflows_router)
 
 

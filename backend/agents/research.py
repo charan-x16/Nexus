@@ -27,12 +27,13 @@ RESEARCH_SYSTEM_PROMPT = (
 
 
 class ResearchAgent(BaseAgent):
-    def __init__(self, goal: str = "") -> None:
+    def __init__(self, goal: str = "", memory_context: str = "") -> None:
         super().__init__(
             model_name=settings.OPENROUTER_MODEL,
             system_prompt=RESEARCH_SYSTEM_PROMPT,
         )
         self.goal = goal
+        self.memory_context = memory_context
 
     async def tavily_search(self, query: str) -> list[SearchResult]:
         api_key = (
@@ -160,10 +161,13 @@ class ResearchAgent(BaseAgent):
                             f"Goal: {self.goal}\n"
                             f"Research task: {task.description}\n"
                             f"Search query: {query}\n"
+                            f"Known project memory:\n{self.memory_context[:1800] or 'None'}\n\n"
                             f"Source title: {result.title}\n"
                             f"Source URL: {result.url}\n"
                             f"Source content:\n{content[:2500]}\n\n"
-                            "Return only one number from 1 to 10."
+                            "Prefer sources that add useful new information "
+                            "instead of repeating known memory. Return only "
+                            "one number from 1 to 10."
                         ),
                     }
                 ],

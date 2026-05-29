@@ -4,15 +4,15 @@ Nexus is an AI Operating System for knowledge work.
 
 The long-term goal is to help a user turn goals into structured work: planning, research, writing, memory, scheduling, and tool execution.
 
-The current implementation is Phase 2:
+The current implementation is Phase 3:
 
 ```text
-User Goal -> Planner Agent -> Human Approval -> Parallel Research Agents -> Writer Agent -> Final Markdown Output
+User Goal -> Planner Agent -> Human Approval -> Memory Retrieval -> Parallel Research Agents -> Writer Agent -> Memory Storage -> Final Markdown Output
 ```
 
 ## Current Status
 
-Phase 1 created the first working vertical slice. Phase 2 adds human approval, web research, scraping, parallel agent execution, and durable LangGraph checkpointing.
+Phase 1 created the first working vertical slice. Phase 2 added human approval, web research, scraping, parallel agent execution, and durable LangGraph checkpointing. Phase 3 adds persistent project memory with pgvector and OpenAI embeddings.
 
 Nexus can currently:
 
@@ -21,12 +21,15 @@ Nexus can currently:
 - Ask a planner agent to create a structured research plan.
 - Pause for human approval before research starts.
 - Resume or reject the graph from the approval step.
+- Retrieve relevant project memory before research starts.
 - Run research subtasks concurrently.
 - Search the web with Tavily.
 - Scrape source pages with Playwright.
 - Fall back to aiohttp and BeautifulSoup when browser scraping fails.
 - Score research result relevance with the configured OpenRouter model.
 - Ask a writer agent to turn the plan and research into a final markdown report.
+- Store research chunks and final-output summaries as vector memory.
+- Search project memory from the UI or API.
 - Save workflow state and agent messages.
 - Let the frontend poll workflow status and render progress.
 
@@ -34,6 +37,7 @@ Detailed phase notes are kept in:
 
 - `docs/phases/phase-1-foundation.md`
 - `docs/phases/phase-2-planner-research-approval.md`
+- `docs/phases/phase-3-persistent-memory.md`
 
 Every major phase or code-flow change should be recorded in `docs/phases/`.
 
@@ -68,6 +72,10 @@ Human Approval
     |
     | POST /workflows/{run_id}/approve
     v
+Memory Retrieval
+    |
+    | pgvector search + model reranking
+    v
 Parallel Research
     |
     | Tavily search + Playwright scrape + relevance scoring
@@ -82,7 +90,7 @@ WriterAgent
     v
 Final Markdown Output
     |
-    | update workflow_run state
+    | store memory + update workflow_run state
     v
 PostgreSQL
     |
@@ -98,6 +106,9 @@ Streamlit Frontend
 - LangGraph for graph-based agent orchestration
 - LangGraph PostgresSaver for durable graph checkpointing
 - OpenRouter for model access through an OpenAI-compatible chat completions API
+- OpenAI embeddings with `text-embedding-3-small`
+- pgvector for vector memory
+- tiktoken for token-aware chunking
 - Tavily for web search
 - Playwright for browser-based scraping
 - aiohttp for scrape fallback
@@ -120,6 +131,7 @@ backend/
   agents/
     base.py                       BaseAgent and OpenRouter model call helper
     planner.py                    PlannerAgent
+    memory_agent.py               MemoryAgent
     research.py                   ResearchAgent
     writer.py                     WriterAgent
   api/routes/
@@ -129,6 +141,11 @@ backend/
     connection.py                 asyncpg pool and query helpers
     migrations/001_initial.sql    Initial database schema
     migrations/002_phase2_statuses.sql
+    migrations/002_vector_memory.sql
+  memory/
+    chunker.py                    Token-aware chunking
+    embeddings.py                 OpenAI embedding helpers
+    store.py                      pgvector memory store
   graphs/
     research_graph.py             LangGraph workflow definition
   observability/
@@ -146,6 +163,7 @@ frontend/
 docs/phases/
   phase-1-foundation.md
   phase-2-planner-research-approval.md
+  phase-3-persistent-memory.md
 
 docker-compose.yml
 requirements.txt
@@ -217,6 +235,17 @@ GET /workflows/{run_id}/status
 
 Returns status, plan, research results, final output, and serialized workflow state.
 
+### Projects
+
+```http
+GET /projects
+POST /projects
+GET /projects/{project_id}/runs
+GET /projects/{project_id}/memory?query=...
+```
+
+Project memory search returns the top relevant memory chunks.
+
 ## Database Schema
 
 The app stores product workflow data in:
@@ -224,6 +253,8 @@ The app stores product workflow data in:
 - `projects`
 - `workflow_runs`
 - `agent_messages`
+- `memory_chunks`
+- `project_summaries`
 
 LangGraph checkpoint tables are created by `PostgresSaver` during startup.
 
@@ -262,6 +293,19 @@ Output:
 
 It searches Tavily, scrapes top URLs, deduplicates by URL, and scores source relevance.
 
+### MemoryAgent
+
+Input:
+
+- Project ID.
+- Query or workflow goal.
+
+Output:
+
+- Formatted relevant memory context.
+
+It retrieves project memory, reranks chunks, and stores summaries after workflow completion.
+
 ### WriterAgent
 
 Input:
@@ -285,7 +329,7 @@ backend/graphs/research_graph.py
 Current graph:
 
 ```text
-START -> planner -> human_approval -> parallel_research -> writer -> END
+START -> planner -> human_approval -> memory_retrieval -> parallel_research -> writer -> memory_storage -> END
 ```
 
 Rejected workflows route from `human_approval` directly to `END`.
@@ -302,11 +346,13 @@ OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 OPENROUTER_MODEL=anthropic/claude-sonnet-4
 OPENROUTER_APP_NAME=Nexus
 OPENROUTER_SITE_URL=http://localhost:8501
+OPENAI_API_KEY=your_openai_key_here
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 TAVILY_API_KEY=your_tavily_key_here
 
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/nexus
 LANGSMITH_API_KEY=
-LANGSMITH_PROJECT=nexus-phase2
+LANGSMITH_PROJECT=nexus-phase3
 ENVIRONMENT=development
 API_BASE_URL=http://localhost:8000
 ```
@@ -385,7 +431,13 @@ Run Phase 2 tests:
 python -m pytest backend/tests/test_phase2.py -q
 ```
 
-Tests mock model and Tavily calls, so they do not require real OpenRouter or Tavily API calls.
+Run Phase 3 tests:
+
+```powershell
+python -m pytest backend/tests/test_phase3.py -q
+```
+
+Tests mock model, embedding, Tavily, and database boundaries where appropriate.
 
 ## Documentation Rule
 
