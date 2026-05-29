@@ -55,7 +55,24 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -r requirements.txt
-      - run: python -m evaluation.langsmith_evals --suite all
+      - name: Check evaluation secrets
+        id: eval-secrets
+        shell: bash
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+        run: |
+          if [[ -n "$OPENROUTER_API_KEY" && -n "$OPENAI_API_KEY" && -n "$TAVILY_API_KEY" && -n "$LANGSMITH_API_KEY" ]]; then
+            echo "has_secrets=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_secrets=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping LangSmith evaluations because one or more required secrets are missing."
+          fi
+      - name: Run LangSmith evaluation suite
+        if: steps.eval-secrets.outputs.has_secrets == 'true'
+        run: python -m evaluation.langsmith_evals --suite all
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
