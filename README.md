@@ -1,574 +1,301 @@
 # Nexus
 
-Nexus is an AI Operating System for knowledge work.
+Nexus is an AI Operating System for knowledge work. It turns a user goal into a planned, researched, reviewed, cited, and stored knowledge artifact.
 
-The long-term goal is to help a user turn goals into structured work: planning, research, writing, memory, scheduling, and tool execution.
+The project now includes six phases:
 
-The current implementation is Phase 5:
+1. FastAPI and LangGraph foundation.
+2. Human approval, web research, scraping, and parallel agents.
+3. Persistent memory with pgvector and embeddings.
+4. Critic reflection loop and structured cited reports.
+5. Background execution, monitoring, token tracking, and dashboard observability.
+6. Production example workflows, LangSmith eval suites, API hardening, load testing, CI, and demo readiness.
 
-```text
-User Goal -> Planner Agent -> Human Approval -> Background Workflow Runner -> Memory Retrieval -> Parallel Research Agents -> Critic Agent -> Targeted Research Loop -> Writer Agent -> Memory Storage -> Structured Final Report
-```
+## Architecture
 
-## Current Status
-
-Phase 1 created the first working vertical slice. Phase 2 added human approval, web research, scraping, parallel agent execution, and durable LangGraph checkpointing. Phase 3 added persistent project memory with pgvector and OpenAI embeddings. Phase 4 added a critic reflection loop and structured reports with inline citations. Phase 5 adds async background execution, scheduled monitoring jobs, token/cost tracking, Prometheus metrics, and a multipage observability dashboard.
-
-Nexus can currently:
-
-- Accept a user goal from the Streamlit UI or FastAPI API.
-- Create a project and workflow run in PostgreSQL.
-- Ask a planner agent to create a structured research plan.
-- Pause for human approval before research starts.
-- Resume, reject, or cancel the graph from the approval step.
-- Continue approved workflows through an async background queue.
-- Retrieve relevant project memory before research starts.
-- Run research subtasks concurrently.
-- Critique research for contradictions, weak evidence, missing context, and unverified claims.
-- Run targeted follow-up research for high-severity critic findings.
-- Search the web with Tavily.
-- Scrape source pages with Playwright.
-- Fall back to aiohttp and BeautifulSoup when browser scraping fails.
-- Score research result relevance with the configured OpenRouter model.
-- Ask a writer agent to produce a structured final report with inline citations.
-- Store research chunks and final-output summaries as vector memory.
-- Search project memory from the UI or API.
-- Record token usage and estimated model cost per run and agent.
-- Estimate workflow cost before research execution starts.
-- Schedule monitoring jobs for project topics.
-- Create monitoring alerts when new relevant information is found.
-- Expose Prometheus metrics for runs, tokens, and cost.
-- Fetch final reports as JSON or markdown.
-- Save workflow state and agent messages.
-- Let the multipage frontend poll workflow status, show monitoring alerts, and render observability charts.
-
-Detailed phase notes are kept in:
-
-- `docs/phases/phase-1-foundation.md`
-- `docs/phases/phase-2-planner-research-approval.md`
-- `docs/phases/phase-3-persistent-memory.md`
-- `docs/phases/phase-4-critic-structured-reports.md`
-- `docs/phases/phase-5-background-observability-monitoring.md`
-
-Every major phase or code-flow change should be recorded in `docs/phases/`.
-
-## Architecture Flow
-
-```text
-Streamlit Frontend
-    |
-    | POST /workflows
-    v
-FastAPI Backend
-    |
-    | create project + workflow_run
-    v
-PostgreSQL
-    |
-    | invoke graph until approval interrupt
-    v
-LangGraph Workflow
-    |
-    | planner node
-    v
-PlannerAgent
-    |
-    | OpenRouter chat completion
-    v
-WorkflowPlan
-    |
-    | interrupt for human approval
-    v
-Human Approval
-    |
-    | POST /workflows/{run_id}/approve
-    v
-Background Workflow Runner
-    |
-    | resumes graph from checkpoint
-    v
-Memory Retrieval
-    |
-    | pgvector search + model reranking
-    v
-Parallel Research
-    |
-    | Tavily search + Playwright scrape + relevance scoring
-    v
-ResearchResult[]
-    |
-    | critic review + targeted research loop
-    v
-CriticReport[]
-    |
-    | writer node
-    v
-WriterAgent
-    |
-    | OpenRouter chat completion
-    v
-Structured Final Report
-    |
-    | store memory + update workflow_run state
-    v
-PostgreSQL
-    |
-    | token usage + run cost + metrics
-    v
-Observability Dashboard
-    |
-    | GET /workflows/{run_id}/status
-    v
-Streamlit Frontend
+```mermaid
+flowchart TD
+    UI[Streamlit Dashboard] --> API[FastAPI Backend]
+    CLI[Example Workflow CLIs] --> Agents
+    API --> DB[(PostgreSQL + pgvector)]
+    API --> Runner[WorkflowRunner Queue]
+    Runner --> Graph[LangGraph Workflow]
+    Graph --> Planner[Planner Agent]
+    Planner --> Approval[Human Approval Interrupt]
+    Approval --> MemoryRead[Memory Retrieval]
+    MemoryRead --> Research[Parallel Research Agents]
+    Research --> Critic[Critic Loop]
+    Critic --> Targeted[Targeted Research]
+    Targeted --> Critic
+    Critic --> Writer[Writer Agent]
+    Writer --> MemoryWrite[Memory Storage]
+    MemoryWrite --> DB
+    Research --> Tavily[Tavily Search]
+    Research --> Scrapers[Playwright + aiohttp + BS4]
+    Planner --> OpenRouter[OpenRouter Model API]
+    Critic --> OpenRouter
+    Writer --> OpenRouter
+    MemoryWrite --> OpenAI[OpenAI Embeddings]
+    Scheduler[APScheduler Monitoring] --> Tavily
+    Scheduler --> DB
+    API --> Metrics[Prometheus Metrics]
+    Agents --> LangSmith[LangSmith Tracing + Eval Suites]
 ```
 
 ## Tech Stack
 
+| Layer | Technology |
+| --- | --- |
+| API | FastAPI, async/await |
+| Agent orchestration | LangGraph |
+| LLM access | OpenRouter chat completions |
+| Embeddings | OpenAI `text-embedding-3-small` |
+| Database | PostgreSQL, asyncpg, pgvector |
+| Checkpointing | LangGraph PostgresSaver |
+| Research | Tavily, Playwright, aiohttp, BeautifulSoup, lxml |
+| Memory | pgvector similarity search, Claude reranking |
+| Scheduling | APScheduler AsyncIOScheduler |
+| Observability | LangSmith, Prometheus client, token/cost tracker |
+| UI | Streamlit multipage app |
+| Testing | pytest, pytest-asyncio, pytest-mock |
+| CI | GitHub Actions, ruff, mypy, pytest-cov |
+
+## Prerequisites
+
 - Python 3.11+
-- FastAPI for the async backend API
-- LangGraph for graph-based agent orchestration
-- LangGraph PostgresSaver for durable graph checkpointing
-- OpenRouter for model access through an OpenAI-compatible chat completions API
-- OpenAI embeddings with `text-embedding-3-small`
-- pgvector for vector memory
-- tiktoken for token-aware chunking
-- Tavily for web search
-- Playwright for browser-based scraping
-- aiohttp for scrape fallback
-- BeautifulSoup and lxml for content extraction
-- APScheduler for recurring monitoring jobs
-- Prometheus client for metrics export
-- Rich for CLI/background task logging
-- PostgreSQL for workflow persistence
-- asyncpg for async database access
-- Pydantic v2 for schemas and settings
-- pydantic-settings for environment configuration
-- LangSmith tracing decorators on agent methods
-- Streamlit for the UI
-- Docker Compose for local services
-- Pytest for tests
-
-## Project Structure
-
-```text
-backend/
-  main.py                         FastAPI application entrypoint
-  config.py                       Environment settings
-  agents/
-    base.py                       BaseAgent and OpenRouter model call helper
-    planner.py                    PlannerAgent
-    memory_agent.py               MemoryAgent
-    critic.py                     CriticAgent
-    research.py                   ResearchAgent
-    writer.py                     WriterAgent
-  api/routes/
-    monitoring.py                  Monitoring job and alert routes
-    observability.py               Token, cost, trace, and metrics routes
-    projects.py                    Project and memory routes
-    workflows.py                  Workflow API routes
-  db/
-    checkpointer.py               LangGraph PostgresSaver setup
-    connection.py                 asyncpg pool and query helpers
-    migrations/001_initial.sql    Initial database schema
-    migrations/002_phase2_statuses.sql
-    migrations/002_vector_memory.sql
-    migrations/003_observability.sql
-    migrations/003_phase4_statuses.sql
-    migrations/004_phase5_statuses.sql
-  memory/
-    chunker.py                    Token-aware chunking
-    embeddings.py                 OpenAI embedding helpers
-    store.py                      pgvector memory store
-  graphs/
-    research_graph.py             LangGraph workflow definition
-  observability/
-    cost_estimator.py              Pre-run workflow cost estimates
-    token_tracker.py               Token usage and cost persistence
-  monitoring/
-    scheduler.py                   APScheduler monitoring jobs
-  tasks/
-    background_runner.py           Async workflow execution queue
-  schemas/
-    api.py                        API request/response models
-    workflow.py                   Workflow state and agent models
-  tests/
-    test_phase1.py
-    test_phase2.py
-    test_phase3.py
-    test_phase4.py
-    test_phase5.py
-
-frontend/
-  dashboard.py                     Streamlit multipage entrypoint
-  app.py                           Legacy single-page Streamlit app
-  api_client.py                    Shared frontend API client
-  pages/1_Workflows.py
-  pages/2_Dashboard.py
-  pages/3_Monitoring.py
-  pages/4_Memory.py
-
-docs/phases/
-  phase-1-foundation.md
-  phase-2-planner-research-approval.md
-  phase-3-persistent-memory.md
-  phase-4-critic-structured-reports.md
-  phase-5-background-observability-monitoring.md
-
-docker-compose.yml
-requirements.txt
-.env.example
-main.py
-```
-
-## Backend API
-
-### Health Check
-
-```http
-GET /health
-```
-
-### Create Workflow
-
-```http
-POST /workflows
-```
-
-Creates the project and workflow run, invokes the graph until the approval interrupt, and returns the generated plan.
-
-Request body:
-
-```json
-{
-  "project_name": "Research Brief",
-  "goal": "Write a concise brief about using pgvector for semantic search."
-}
-```
-
-Response:
-
-```json
-{
-  "run_id": "uuid",
-  "status": "awaiting_approval",
-  "plan": {
-    "title": "Plan title",
-    "goal": "User goal",
-    "subtasks": []
-  },
-  "cost_estimate": {
-    "min_usd": "0.075600",
-    "max_usd": "0.156600",
-    "estimated_usd": "0.108000",
-    "breakdown_by_agent": {
-      "planner": "0.014400",
-      "research": "0.064800",
-      "critic": "0.028800",
-      "writer": "0.036000"
-    }
-  },
-  "output": null
-}
-```
-
-### Approve Workflow
-
-```http
-POST /workflows/{run_id}/approve
-```
-
-Resumes the graph from the human approval interrupt and starts research in the background.
-
-### Cancel Workflow
-
-```http
-POST /workflows/{run_id}/cancel
-```
-
-Cancels an active background workflow and marks it as `cancelled`.
-
-### Reject Workflow
-
-```http
-POST /workflows/{run_id}/reject
-```
-
-Resumes the graph with rejection and marks the workflow as rejected.
-
-### Get Workflow Status
-
-```http
-GET /workflows/{run_id}/status
-GET /workflows/{run_id}/report
-GET /workflows/{run_id}/report.md
-```
-
-Returns status, plan, research results, critic reports, final report, final output, and serialized workflow state.
-
-### Projects
-
-```http
-GET /projects
-POST /projects
-GET /projects/{project_id}/runs
-GET /projects/{project_id}/memory?query=...
-```
-
-Project memory search returns the top relevant memory chunks.
-
-### Monitoring
-
-```http
-POST /monitoring/jobs
-GET /monitoring/jobs
-DELETE /monitoring/jobs/{job_id}
-GET /monitoring/alerts
-GET /monitoring/alerts/{job_id}
-```
-
-Monitoring jobs run on cron schedules and create alerts when new relevant findings appear.
-
-### Observability
-
-```http
-GET /observability/runs/{run_id}/tokens
-GET /observability/projects/{project_id}/cost
-GET /observability/runs/{run_id}/trace
-GET /observability/dashboard
-GET /metrics
-```
-
-Observability routes expose token usage, cost summaries, LangSmith trace links, and Prometheus metrics.
-
-## Database Schema
-
-The app stores product workflow data in:
-
-- `projects`
-- `workflow_runs`
-- `agent_messages`
-- `memory_chunks`
-- `project_summaries`
-- `token_usage`
-- `monitoring_jobs`
-- `monitoring_alerts`
-
-LangGraph checkpoint tables are created by `PostgresSaver` during startup.
-
-## Agent Flow
-
-### BaseAgent
-
-Shared base class for model-backed agents.
-
-It handles:
-
-- Model name and system prompt setup.
-- Async OpenRouter calls.
-- LangSmith tracing.
-- Token usage logging and database-backed cost tracking when `run_id` is available.
-
-### PlannerAgent
-
-Input:
-
-- User goal.
-
-Output:
-
-- `WorkflowPlan` with title, goal, and prioritized `ResearchTask` items.
-
-### ResearchAgent
-
-Input:
-
-- One `ResearchTask`.
-
-Output:
-
-- Sorted `ResearchResult` records.
-
-It searches Tavily, scrapes top URLs, deduplicates by URL, and scores source relevance.
-
-### MemoryAgent
-
-Input:
-
-- Project ID.
-- Query or workflow goal.
-
-Output:
-
-- Formatted relevant memory context.
-
-It retrieves project memory, reranks chunks, and stores summaries after workflow completion.
-
-### CriticAgent
-
-Input:
-
-- User goal.
-- Workflow plan.
-- Research results.
-
-Output:
-
-- `CriticReport` with findings and pass/fail recommendation.
-
-It drives the targeted research loop before writing.
-
-### WriterAgent
-
-Input:
-
-- User goal.
-- Approved workflow plan.
-- Research results.
-
-Output:
-
-- `FinalReport` JSON with inline citations and a confidence score.
-
-## LangGraph Workflow
-
-Defined in:
-
-```text
-backend/graphs/research_graph.py
-```
-
-Current graph:
-
-```text
-START -> planner -> human_approval -> memory_retrieval -> parallel_research -> critic -> [targeted_research -> critic]* -> writer -> memory_storage -> END
-```
-
-Rejected workflows route from `human_approval` directly to `END`.
-
-Approved workflows are resumed by `WorkflowRunner` in `backend/tasks/background_runner.py`, so long-running research and writing work does not block the approval API request.
-
-## Environment Variables
-
-Create a `.env` file from `.env.example`.
-
-For running the backend locally with Postgres exposed on `localhost:5432`:
-
-```env
-OPENROUTER_API_KEY=your_openrouter_key_here
-OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-OPENROUTER_MODEL=anthropic/claude-sonnet-4
-OPENROUTER_APP_NAME=Nexus
-OPENROUTER_SITE_URL=http://localhost:8501
-OPENAI_API_KEY=your_openai_key_here
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
-TAVILY_API_KEY=your_tavily_key_here
-
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/nexus
-LANGSMITH_API_KEY=
-LANGSMITH_PROJECT=nexus-phase5
-ENVIRONMENT=development
-API_BASE_URL=http://localhost:8000
-```
-
-When running the backend inside Docker Compose, use the Docker service hostname:
-
-```env
-DATABASE_URL=postgresql://postgres:postgres@postgres:5432/nexus
-```
-
-## Local Setup
-
-Install dependencies:
+- Docker Desktop
+- PostgreSQL available through Docker Compose
+- OpenRouter API key
+- OpenAI API key for embeddings
+- Tavily API key for web search
+- LangSmith API key for tracing and evals
+
+## Installation
 
 ```powershell
+python -m venv .venv
+.venv\Scripts\activate
 pip install -r requirements.txt
-```
-
-Install Playwright browser binaries:
-
-```powershell
 python -m playwright install chromium
 ```
 
-Start Postgres:
+Create `.env` from `.env.example`.
 
-```powershell
-docker compose up -d postgres
-```
+## Environment Variables
 
-Start the backend:
+| Variable | Description |
+| --- | --- |
+| `OPENROUTER_API_KEY` | API key for OpenRouter model calls |
+| `OPENROUTER_BASE_URL` | OpenRouter API base URL |
+| `OPENROUTER_MODEL` | Model used by agents, default `anthropic/claude-sonnet-4` |
+| `OPENROUTER_APP_NAME` | App title sent to OpenRouter |
+| `OPENROUTER_SITE_URL` | Site URL sent to OpenRouter |
+| `OPENAI_API_KEY` | API key for embeddings |
+| `OPENAI_EMBEDDING_MODEL` | Embedding model, default `text-embedding-3-small` |
+| `TAVILY_API_KEY` | Tavily API key for search and extraction fallback |
+| `DATABASE_URL` | PostgreSQL connection URL |
+| `LANGSMITH_API_KEY` | LangSmith tracing and evaluation key |
+| `LANGSMITH_PROJECT` | LangSmith project name |
+| `ENVIRONMENT` | Runtime environment, use `development` or `test` |
+| `API_BASE_URL` | Frontend and scripts API base URL |
+| `NEXUS_ALLOW_TIKTOKEN_DOWNLOAD` | Optional flag to allow tokenizer downloads |
 
-```powershell
-uvicorn backend.main:app --reload
-```
+## Running Locally
 
-Start the frontend in another terminal:
-
-```powershell
-streamlit run frontend/dashboard.py
-```
-
-Open:
-
-```text
-Backend:  http://localhost:8000
-Health:   http://localhost:8000/health
-Frontend: http://localhost:8501
-```
-
-## Docker Compose
-
-Run all services:
+Start the full stack:
 
 ```powershell
 docker compose up
 ```
 
-Services:
-
-- `postgres`: PostgreSQL with pgvector image
-- `app`: FastAPI backend
-- `streamlit`: Streamlit frontend
-
-## Tests
-
-Run Phase 1 compatibility tests:
+Start services manually:
 
 ```powershell
-python -m pytest backend/tests/test_phase1.py -q
+docker compose up -d postgres
+uvicorn backend.main:app --reload
+streamlit run frontend/dashboard.py
 ```
 
-Run Phase 2 tests:
+Open:
+
+| Service | URL |
+| --- | --- |
+| Backend | `http://localhost:8000` |
+| Health | `http://localhost:8000/health` |
+| Frontend | `http://localhost:8501` |
+| Metrics | `http://localhost:8000/metrics` |
+
+## Example Workflows
+
+Market research:
 
 ```powershell
-python -m pytest backend/tests/test_phase2.py -q
+python -m workflows.market_research --company "Acme" --industry "SaaS" --geo "India"
 ```
 
-Run Phase 3 tests:
+Competitor analysis:
 
 ```powershell
-python -m pytest backend/tests/test_phase3.py -q
+python -m workflows.competitor_analysis --company "Us" --competitors "A,B,C"
 ```
 
-Run Phase 4 tests:
+Trend monitoring:
 
 ```powershell
-python -m pytest backend/tests/test_phase4.py -q
+python -m workflows.trend_monitor --topic "AI regulation" --keywords "EU AI Act,GDPR,LLM regulation"
 ```
 
-Run Phase 5 tests:
+## API Reference
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Health check |
+| `POST` | `/workflows` | Create a plan and pause for approval |
+| `POST` | `/workflows/{run_id}/approve` | Resume approved workflow through the background queue |
+| `POST` | `/workflows/{run_id}/reject` | Reject a pending workflow |
+| `POST` | `/workflows/{run_id}/cancel` | Cancel a queued or running workflow |
+| `GET` | `/workflows/{run_id}` | Get workflow status |
+| `GET` | `/workflows/{run_id}/status` | Get workflow status and serialized state |
+| `GET` | `/workflows/{run_id}/report` | Get final report JSON |
+| `GET` | `/workflows/{run_id}/report.md` | Get final report markdown |
+| `GET` | `/projects` | List projects |
+| `POST` | `/projects` | Create project |
+| `GET` | `/projects/{project_id}/runs` | List project workflow runs |
+| `GET` | `/projects/{project_id}/memory` | Search project memory |
+| `POST` | `/monitoring/jobs` | Create monitoring job |
+| `GET` | `/monitoring/jobs` | List monitoring jobs |
+| `DELETE` | `/monitoring/jobs/{job_id}` | Deactivate monitoring job |
+| `GET` | `/monitoring/alerts` | List recent monitoring alerts |
+| `GET` | `/monitoring/alerts/{job_id}` | List alerts for a job |
+| `GET` | `/observability/runs/{run_id}/tokens` | Token and cost breakdown for a run |
+| `GET` | `/observability/projects/{project_id}/cost` | Project cost summary |
+| `GET` | `/observability/runs/{run_id}/trace` | LangSmith trace search URL |
+| `GET` | `/observability/dashboard` | Dashboard aggregates |
+| `GET` | `/metrics` | Prometheus metrics |
+
+## Running Evaluations
+
+Run all local evaluation suites:
 
 ```powershell
-python -m pytest backend/tests/test_phase5.py -q
+python -m evaluation.langsmith_evals --suite all
 ```
 
-Tests mock model, embedding, Tavily, and database boundaries where appropriate.
+Run the registered LangSmith planner eval:
 
-## Documentation Rule
+```powershell
+python -m evaluation.langsmith_evals --suite langsmith
+```
 
-For every major change in project behavior, architecture, workflow, or code flow:
+Datasets live in:
 
-1. Update this README if the change affects how the project works or runs.
-2. Add or update a phase document under `docs/phases/`.
-3. Keep the architecture flow current.
-4. Keep setup commands and environment variables current.
+```text
+evaluation/datasets/planner_dataset.json
+evaluation/datasets/critic_dataset.json
+```
+
+## Load Testing
+
+Run five concurrent workflows against a running backend:
+
+```powershell
+python scripts/load_test.py --base-url http://localhost:8000
+```
+
+The script reports time to first response, time to completion, p50/p95/p99 latency, tokens, cost, and failed runs.
+
+## Project Structure
+
+```text
+backend/
+  agents/
+    base.py
+    critic.py
+    memory_agent.py
+    planner.py
+    research.py
+    writer.py
+  api/routes/
+    monitoring.py
+    observability.py
+    projects.py
+    workflows.py
+  db/
+    checkpointer.py
+    connection.py
+    migrations/
+  graphs/
+    research_graph.py
+  memory/
+    chunker.py
+    embeddings.py
+    store.py
+  monitoring/
+    scheduler.py
+  observability/
+    cost_estimator.py
+    token_tracker.py
+  schemas/
+    api.py
+    workflow.py
+  tasks/
+    background_runner.py
+  tests/
+
+frontend/
+  app.py
+  api_client.py
+  dashboard.py
+  pages/
+
+workflows/
+  market_research.py
+  competitor_analysis.py
+  trend_monitor.py
+  common.py
+
+evaluation/
+  langsmith_evals.py
+  datasets/
+
+middleware/
+  rate_limiter.py
+  request_queue.py
+
+scripts/
+  load_test.py
+
+docs/phases/
+.github/workflows/ci.yml
+docker-compose.yml
+requirements.txt
+pyproject.toml
+```
+
+## How To Add A New Agent
+
+1. Create a schema in `backend/schemas/workflow.py` for the agent input or output.
+2. Create `backend/agents/<agent_name>.py`.
+3. Extend `BaseAgent` from `backend/agents/base.py`.
+4. Add a specific system prompt.
+5. Implement `async run(...)`.
+6. Use Pydantic validation for structured model output.
+7. Pass `run_id` into `_call_model()` when the agent runs inside a workflow.
+8. Add a LangSmith `@traceable` decorator to public agent methods.
+9. Add the agent node in `backend/graphs/research_graph.py` if it belongs in the main graph.
+10. Add tests under `backend/tests/`.
+11. Update this README and add or update the relevant phase document.
+
+## CI
+
+GitHub Actions runs:
+
+- ruff lint
+- mypy type checking
+- pytest with coverage
+- PostgreSQL service through Docker Compose
+- LangSmith evaluation suite on merge to `main`
+
+## License
+
+This project is licensed under the terms in `LICENSE`.

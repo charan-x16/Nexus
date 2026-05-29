@@ -2,7 +2,7 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -109,7 +109,7 @@ class MonitoringScheduler:
         )
         self._schedule_runtime_job(job, trigger=trigger)
         scheduled = self.scheduler.get_job(job.id)
-        next_run_at = scheduled.next_run_time if scheduled is not None else None
+        next_run_at = getattr(scheduled, "next_run_time", None) if scheduled else None
         await _execute_with_retry(
             """
             UPDATE monitoring_jobs
@@ -213,7 +213,7 @@ class MonitoringScheduler:
             )
 
         scheduled = self.scheduler.get_job(job.id)
-        next_run_at = scheduled.next_run_time if scheduled is not None else None
+        next_run_at = getattr(scheduled, "next_run_time", None) if scheduled else None
         await _execute_with_retry(
             """
             UPDATE monitoring_jobs

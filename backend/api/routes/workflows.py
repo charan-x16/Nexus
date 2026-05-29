@@ -128,15 +128,20 @@ async def approve_workflow(
             detail="Workflow is not awaiting approval.",
         )
 
-    state["awaiting_approval"] = False
-    state["status"] = "researching"
-    await _update_workflow_status(run_id, "researching", state)
-    await workflow_runner.submit(
+    decision = await workflow_runner.submit(
         run_id=str(run_id),
         goal=state.get("goal", ""),
         project_id=state.get("project_id", ""),
     )
-    return WorkflowDecisionResponse(run_id=run_id, status="researching")
+    state["awaiting_approval"] = False
+    state["status"] = decision.status
+    await _update_workflow_status(run_id, decision.status, state)
+    return WorkflowDecisionResponse(
+        run_id=run_id,
+        status=decision.status,
+        position=decision.position,
+        estimated_wait_minutes=decision.estimated_wait_minutes,
+    )
 
 
 @router.post("/{run_id}/cancel", response_model=WorkflowDecisionResponse)

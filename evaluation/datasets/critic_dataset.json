@@ -1,0 +1,125 @@
+[
+  {
+    "goal": "Assess the size of the Indian SaaS market.",
+    "planted_contradictions": 1,
+    "known_weak_claims": 1,
+    "research_results": [
+      {
+        "task_id": "market-size",
+        "query": "Indian SaaS market size",
+        "url": "https://example.com/saas-2024",
+        "title": "India SaaS Market 2024",
+        "content": "The Indian SaaS market reached USD 15 billion in 2024 according to a survey of public companies.",
+        "relevance_score": 8
+      },
+      {
+        "task_id": "market-size",
+        "query": "India SaaS market forecast",
+        "url": "https://example.com/saas-forecast",
+        "title": "Forecast Report",
+        "content": "The Indian SaaS market was only USD 3 billion in 2024, with no methodology disclosed.",
+        "relevance_score": 7
+      }
+    ]
+  },
+  {
+    "goal": "Compare two CRM competitors on pricing.",
+    "planted_contradictions": 2,
+    "known_weak_claims": 1,
+    "research_results": [
+      {
+        "task_id": "pricing",
+        "query": "Vendor A pricing",
+        "url": "https://example.com/vendor-a-pricing",
+        "title": "Vendor A Pricing",
+        "content": "Vendor A starts at $49 per user per month and does not offer a free plan.",
+        "relevance_score": 8
+      },
+      {
+        "task_id": "pricing",
+        "query": "Vendor A pricing review",
+        "url": "https://example.com/vendor-a-review",
+        "title": "Vendor A Review",
+        "content": "Vendor A has a free plan and starts paid plans at $19 per user per month.",
+        "relevance_score": 8
+      },
+      {
+        "task_id": "pricing",
+        "query": "Vendor B pricing",
+        "url": "https://example.com/vendor-b",
+        "title": "Vendor B",
+        "content": "Vendor B is the cheapest CRM in the world, according to unnamed users.",
+        "relevance_score": 5
+      }
+    ]
+  },
+  {
+    "goal": "Research AI regulation for enterprise software.",
+    "planted_contradictions": 1,
+    "known_weak_claims": 2,
+    "research_results": [
+      {
+        "task_id": "regulation",
+        "query": "EU AI Act enterprise obligations",
+        "url": "https://example.com/eu-ai-act",
+        "title": "EU AI Act Guide",
+        "content": "The EU AI Act requires risk management obligations for high-risk AI systems.",
+        "relevance_score": 9
+      },
+      {
+        "task_id": "regulation",
+        "query": "EU AI Act no obligations",
+        "url": "https://example.com/blog-ai-act",
+        "title": "Opinion Blog",
+        "content": "The EU AI Act creates no obligations for enterprise software companies. This post cites no sources.",
+        "relevance_score": 6
+      }
+    ]
+  },
+  {
+    "goal": "Analyze funding for a competitor.",
+    "planted_contradictions": 1,
+    "known_weak_claims": 1,
+    "research_results": [
+      {
+        "task_id": "funding",
+        "query": "Competitor funding",
+        "url": "https://example.com/series-b",
+        "title": "Funding News",
+        "content": "The company raised a $50 million Series B in March 2025.",
+        "relevance_score": 8
+      },
+      {
+        "task_id": "funding",
+        "query": "Competitor total funding",
+        "url": "https://example.com/profile",
+        "title": "Company Profile",
+        "content": "The company has never raised outside capital and remains bootstrapped.",
+        "relevance_score": 7
+      }
+    ]
+  },
+  {
+    "goal": "Evaluate customer sentiment for a product.",
+    "planted_contradictions": 1,
+    "known_weak_claims": 2,
+    "research_results": [
+      {
+        "task_id": "reviews",
+        "query": "Product reviews",
+        "url": "https://example.com/reviews-a",
+        "title": "Review Aggregator A",
+        "content": "Customers consistently praise support responsiveness and onboarding quality.",
+        "relevance_score": 8
+      },
+      {
+        "task_id": "reviews",
+        "query": "Product complaints",
+        "url": "https://example.com/reviews-b",
+        "title": "Review Aggregator B",
+        "content": "Customers consistently complain that support is slow and onboarding is poor.",
+        "relevance_score": 8
+      }
+    ]
+  }
+]

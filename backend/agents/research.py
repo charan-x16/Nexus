@@ -1,6 +1,8 @@
 import asyncio
 import json
+import random
 import re
+import time
 from typing import Any
 
 import aiohttp
@@ -31,6 +33,21 @@ RESEARCH_SYSTEM_PROMPT = (
     "user goal with a single number from 1 to 10. Return only the number."
 )
 
+SCRAPE_CACHE_TTL_SECONDS = 3600
+_SCRAPE_CACHE: dict[str, tuple[float, str]] = {}
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5; rv:126.0) Gecko/20100101 Firefox/126.0",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edg/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:126.0) Gecko/20100101 Firefox/126.0",
+]
+
 
 class ResearchAgent(BaseAgent):
     def __init__(
@@ -59,8 +76,9 @@ class ResearchAgent(BaseAgent):
             raise RuntimeError("tavily-python is required for Tavily search.")
 
         client = AsyncTavilyClient(api_key=api_key)
-        for attempt in range(4):
+        for attempt in range(3):
             try:
+                await _polite_delay()
                 response = await client.search(
                     query=query,
                     search_depth="advanced",
@@ -77,20 +95,25 @@ class ResearchAgent(BaseAgent):
                     if item.get("url")
                 ]
             except Exception as exc:
-                if attempt < 3 and _is_retryable_tavily_error(exc):
+                if attempt < 2 and _is_retryable_tavily_error(exc):
                     await asyncio.sleep(2**attempt)
                     continue
                 return []
         return []
 
     async def scrape_page(self, url: str) -> str:
-        try:
-            return await asyncio.wait_for(self._scrape_with_playwright(url), timeout=30)
-        except Exception:
-            try:
-                return await asyncio.wait_for(self._scrape_with_aiohttp(url), timeout=30)
-            except Exception:
-                return ""
+        cached = _cache_get(url)
+        if cached is not None:
+            return cached
+
+        content = await self._scrape_with_backoff(self._scrape_with_playwright, url)
+        if not content:
+            content = await self._scrape_with_backoff(self._scrape_with_aiohttp, url)
+        if not content:
+            content = await self._extract_with_tavily(url)
+        if content:
+            _cache_set(url, content)
+        return content
 
     @traceable(name="ResearchAgent.run")
     async def run(self, task: ResearchTask) -> list[ResearchResult]:
@@ -198,7 +221,7 @@ class ResearchAgent(BaseAgent):
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(headless=True)
             try:
-                page = await browser.new_page()
+                page = await browser.new_page(user_agent=_random_user_agent())
                 await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
                 html = await page.content()
             finally:
@@ -207,10 +230,9 @@ class ResearchAgent(BaseAgent):
 
     async def _scrape_with_aiohttp(self, url: str) -> str:
         headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (compatible; NexusResearchBot/0.1; "
-                "+https://localhost)"
-            )
+            "User-Agent": _random_user_agent(),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
         }
         async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
@@ -218,6 +240,42 @@ class ResearchAgent(BaseAgent):
                     return ""
                 html = await response.text(errors="ignore")
         return _extract_main_content(html)
+
+    async def _scrape_with_backoff(self, scraper: Any, url: str) -> str:
+        for attempt in range(3):
+            try:
+                await _polite_delay()
+                content = await asyncio.wait_for(scraper(url), timeout=30)
+                if content:
+                    return content
+            except Exception:
+                if attempt < 2:
+                    await asyncio.sleep(2**attempt)
+        return ""
+
+    async def _extract_with_tavily(self, url: str) -> str:
+        api_key = (
+            settings.TAVILY_API_KEY.get_secret_value()
+            if settings.TAVILY_API_KEY is not None
+            else None
+        )
+        if not api_key or AsyncTavilyClient is None:
+            return ""
+
+        client = AsyncTavilyClient(api_key=api_key)
+        for attempt in range(3):
+            try:
+                await _polite_delay()
+                response = await client.extract(urls=[url])
+                results = response.get("results", []) if isinstance(response, dict) else []
+                for item in results:
+                    content = item.get("raw_content") or item.get("content") or ""
+                    if content:
+                        return str(content)[:4000].strip()
+            except Exception:
+                if attempt < 2:
+                    await asyncio.sleep(2**attempt)
+        return ""
 
     async def _score_relevance(
         self,
@@ -326,3 +384,28 @@ def _unique_queries(queries: list[str]) -> list[str]:
             seen.add(key)
             unique.append(normalized)
     return unique
+
+
+def _cache_get(url: str) -> str | None:
+    cached = _SCRAPE_CACHE.get(url)
+    if cached is None:
+        return None
+    expires_at, content = cached
+    if expires_at <= time.monotonic():
+        _SCRAPE_CACHE.pop(url, None)
+        return None
+    return content
+
+
+def _cache_set(url: str, content: str) -> None:
+    _SCRAPE_CACHE[url] = (time.monotonic() + SCRAPE_CACHE_TTL_SECONDS, content[:4000])
+
+
+def _random_user_agent() -> str:
+    return random.choice(USER_AGENTS)
+
+
+async def _polite_delay() -> None:
+    if settings.ENVIRONMENT.lower() == "test":
+        return
+    await asyncio.sleep(random.uniform(1.0, 3.0))

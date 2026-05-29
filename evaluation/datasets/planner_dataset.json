@@ -1,0 +1,42 @@
+[
+  {
+    "goal": "Create a market entry brief for a telehealth startup expanding into Brazil.",
+    "expected_tasks": ["market size", "competitors", "regulation", "customer segments", "risks"]
+  },
+  {
+    "goal": "Research enterprise adoption of retrieval augmented generation in financial services.",
+    "expected_tasks": ["use cases", "vendors", "security", "compliance", "implementation risks"]
+  },
+  {
+    "goal": "Prepare a technical buying guide for vector databases for a data platform team.",
+    "expected_tasks": ["requirements", "vendor comparison", "performance", "cost", "migration plan"]
+  },
+  {
+    "goal": "Analyze opportunities for an Indian SaaS company entering the Middle East CRM market.",
+    "expected_tasks": ["market demand", "key players", "localization", "channels", "regulation"]
+  },
+  {
+    "goal": "Build an executive brief on AI regulation changes affecting generative AI products.",
+    "expected_tasks": ["policy landscape", "jurisdictions", "product impact", "compliance", "timeline"]
+  },
+  {
+    "goal": "Evaluate customer support automation vendors for a mid-market ecommerce brand.",
+    "expected_tasks": ["vendor list", "features", "pricing", "integrations", "customer reviews"]
+  },
+  {
+    "goal": "Research the competitive landscape for climate risk analytics software.",
+    "expected_tasks": ["market overview", "competitors", "data sources", "buyers", "risks"]
+  },
+  {
+    "goal": "Create a launch plan for a developer productivity tool targeting Python teams.",
+    "expected_tasks": ["personas", "channels", "competitors", "positioning", "metrics"]
+  },
+  {
+    "goal": "Assess whether a healthcare company should adopt open-source LLMs for internal workflows.",
+    "expected_tasks": ["use cases", "privacy", "deployment", "cost", "governance"]
+  },
+  {
+    "goal": "Produce a research report on the future of agentic workflows in knowledge work.",
+    "expected_tasks": ["market trends", "technology stack", "adoption barriers", "vendors", "predictions"]
+  }
+]

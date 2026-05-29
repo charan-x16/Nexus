@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from middleware.rate_limiter import RateLimiterMiddleware
 
 from backend.api.routes.monitoring import router as monitoring_router
 from backend.api.routes.observability import metrics_router, router as observability_router
@@ -33,6 +34,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(RateLimiterMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

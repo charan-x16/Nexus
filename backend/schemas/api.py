@@ -26,6 +26,8 @@ class WorkflowCreateResponse(BaseModel):
 class WorkflowDecisionResponse(BaseModel):
     run_id: UUID
     status: str
+    position: int | None = None
+    estimated_wait_minutes: int | None = None
 
 
 class WorkflowStatusResponse(BaseModel):

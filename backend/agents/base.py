@@ -11,7 +11,6 @@ from backend.observability.token_tracker import (
     token_tracker,
     track_token_usage,
 )
-from backend.schemas.workflow import WorkflowState
 
 
 class BaseAgent(ABC):

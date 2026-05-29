@@ -15,6 +15,7 @@ from backend.schemas.workflow import (
     WorkflowState,
     serialize_workflow_state,
 )
+from middleware.request_queue import QueueDecision, workflow_execution_queue
 
 
 console = Console()
@@ -51,11 +52,16 @@ class WorkflowRunner:
         self.active_runs.clear()
         console.log("[workflow_runner] stopped")
 
-    async def submit(self, run_id: str, goal: str, project_id: str) -> None:
+    async def submit(self, run_id: str, goal: str, project_id: str) -> QueueDecision:
+        decision = await workflow_execution_queue.reserve(run_id)
         await self.run_queue.put(
             WorkflowJob(run_id=run_id, goal=goal, project_id=project_id)
         )
-        console.log(f"[workflow_runner] queued run {run_id}")
+        console.log(
+            f"[workflow_runner] queued run {run_id} "
+            f"status={decision.status} position={decision.position}"
+        )
+        return decision
 
     async def worker(self) -> None:
         while not self._stopped.is_set():
@@ -98,6 +104,7 @@ class WorkflowRunner:
         if task is not None and not task.done():
             task.cancel()
             await _suppress_cancelled(task)
+        await workflow_execution_queue.release(run_id)
         state = await _load_state_for_runner(run_id)
         state["awaiting_approval"] = False
         state["status"] = "cancelled"
@@ -112,15 +119,16 @@ class WorkflowRunner:
         await _update_status_with_retry(run_id, "cancelled", state)
 
     async def _run_with_tracking(self, job: WorkflowJob) -> None:
-        state = await _load_state_for_runner(job.run_id)
-        if state.get("status") == "cancelled":
-            return
-        state["status"] = "researching"
-        state["awaiting_approval"] = False
-        await _update_status_with_retry(job.run_id, "researching", state)
-
-        config = {"configurable": {"thread_id": job.run_id}}
         try:
+            await workflow_execution_queue.wait_for_slot(job.run_id)
+            state = await _load_state_for_runner(job.run_id)
+            if state.get("status") == "cancelled":
+                return
+            state["status"] = "researching"
+            state["awaiting_approval"] = False
+            await _update_status_with_retry(job.run_id, "researching", state)
+
+            config = {"configurable": {"thread_id": job.run_id}}
             graph = get_compiled_graph()
             graph_result = await graph.ainvoke(
                 Command(resume={"approved": True}),
@@ -149,10 +157,13 @@ class WorkflowRunner:
             ]
             await _update_status_with_retry(job.run_id, "failed", failed_state)
             console.log(f"[workflow_runner] failed run {job.run_id}: {exc}")
+        finally:
+            await workflow_execution_queue.release(job.run_id)
 
     def _finish_task(self, run_id: str, task: asyncio.Task[None]) -> None:
         self.active_runs.pop(run_id, None)
         self.run_queue.task_done()
+        asyncio.create_task(workflow_execution_queue.release(run_id))
         if task.cancelled():
             console.log(f"[workflow_runner] cancelled run {run_id}")
         elif task.exception() is not None:

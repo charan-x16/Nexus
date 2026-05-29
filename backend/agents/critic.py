@@ -7,7 +7,6 @@ from pydantic import ValidationError
 from backend.agents.base import BaseAgent
 from backend.config import settings
 from backend.schemas.workflow import (
-    CriticFinding,
     CriticReport,
     ResearchResult,
     WorkflowPlan,
