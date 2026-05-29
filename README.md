@@ -4,15 +4,15 @@ Nexus is an AI Operating System for knowledge work.
 
 The long-term goal is to help a user turn goals into structured work: planning, research, writing, memory, scheduling, and tool execution.
 
-The current implementation is Phase 3:
+The current implementation is Phase 4:
 
 ```text
-User Goal -> Planner Agent -> Human Approval -> Memory Retrieval -> Parallel Research Agents -> Writer Agent -> Memory Storage -> Final Markdown Output
+User Goal -> Planner Agent -> Human Approval -> Memory Retrieval -> Parallel Research Agents -> Critic Agent -> Targeted Research Loop -> Writer Agent -> Memory Storage -> Structured Final Report
 ```
 
 ## Current Status
 
-Phase 1 created the first working vertical slice. Phase 2 added human approval, web research, scraping, parallel agent execution, and durable LangGraph checkpointing. Phase 3 adds persistent project memory with pgvector and OpenAI embeddings.
+Phase 1 created the first working vertical slice. Phase 2 added human approval, web research, scraping, parallel agent execution, and durable LangGraph checkpointing. Phase 3 added persistent project memory with pgvector and OpenAI embeddings. Phase 4 adds a critic reflection loop and structured reports with inline citations.
 
 Nexus can currently:
 
@@ -23,13 +23,16 @@ Nexus can currently:
 - Resume or reject the graph from the approval step.
 - Retrieve relevant project memory before research starts.
 - Run research subtasks concurrently.
+- Critique research for contradictions, weak evidence, missing context, and unverified claims.
+- Run targeted follow-up research for high-severity critic findings.
 - Search the web with Tavily.
 - Scrape source pages with Playwright.
 - Fall back to aiohttp and BeautifulSoup when browser scraping fails.
 - Score research result relevance with the configured OpenRouter model.
-- Ask a writer agent to turn the plan and research into a final markdown report.
+- Ask a writer agent to produce a structured final report with inline citations.
 - Store research chunks and final-output summaries as vector memory.
 - Search project memory from the UI or API.
+- Fetch final reports as JSON or markdown.
 - Save workflow state and agent messages.
 - Let the frontend poll workflow status and render progress.
 
@@ -38,6 +41,7 @@ Detailed phase notes are kept in:
 - `docs/phases/phase-1-foundation.md`
 - `docs/phases/phase-2-planner-research-approval.md`
 - `docs/phases/phase-3-persistent-memory.md`
+- `docs/phases/phase-4-critic-structured-reports.md`
 
 Every major phase or code-flow change should be recorded in `docs/phases/`.
 
@@ -82,13 +86,17 @@ Parallel Research
     v
 ResearchResult[]
     |
+    | critic review + targeted research loop
+    v
+CriticReport[]
+    |
     | writer node
     v
 WriterAgent
     |
     | OpenRouter chat completion
     v
-Final Markdown Output
+Structured Final Report
     |
     | store memory + update workflow_run state
     v
@@ -132,6 +140,7 @@ backend/
     base.py                       BaseAgent and OpenRouter model call helper
     planner.py                    PlannerAgent
     memory_agent.py               MemoryAgent
+    critic.py                     CriticAgent
     research.py                   ResearchAgent
     writer.py                     WriterAgent
   api/routes/
@@ -142,6 +151,7 @@ backend/
     migrations/001_initial.sql    Initial database schema
     migrations/002_phase2_statuses.sql
     migrations/002_vector_memory.sql
+    migrations/003_phase4_statuses.sql
   memory/
     chunker.py                    Token-aware chunking
     embeddings.py                 OpenAI embedding helpers
@@ -156,6 +166,8 @@ backend/
   tests/
     test_phase1.py
     test_phase2.py
+    test_phase3.py
+    test_phase4.py
 
 frontend/
   app.py                          Streamlit app
@@ -164,6 +176,7 @@ docs/phases/
   phase-1-foundation.md
   phase-2-planner-research-approval.md
   phase-3-persistent-memory.md
+  phase-4-critic-structured-reports.md
 
 docker-compose.yml
 requirements.txt
@@ -231,9 +244,11 @@ Resumes the graph with rejection and marks the workflow as rejected.
 
 ```http
 GET /workflows/{run_id}/status
+GET /workflows/{run_id}/report
+GET /workflows/{run_id}/report.md
 ```
 
-Returns status, plan, research results, final output, and serialized workflow state.
+Returns status, plan, research results, critic reports, final report, final output, and serialized workflow state.
 
 ### Projects
 
@@ -306,6 +321,20 @@ Output:
 
 It retrieves project memory, reranks chunks, and stores summaries after workflow completion.
 
+### CriticAgent
+
+Input:
+
+- User goal.
+- Workflow plan.
+- Research results.
+
+Output:
+
+- `CriticReport` with findings and pass/fail recommendation.
+
+It drives the targeted research loop before writing.
+
 ### WriterAgent
 
 Input:
@@ -316,7 +345,7 @@ Input:
 
 Output:
 
-- Final markdown report.
+- `FinalReport` JSON with inline citations and a confidence score.
 
 ## LangGraph Workflow
 
@@ -329,7 +358,7 @@ backend/graphs/research_graph.py
 Current graph:
 
 ```text
-START -> planner -> human_approval -> memory_retrieval -> parallel_research -> writer -> memory_storage -> END
+START -> planner -> human_approval -> memory_retrieval -> parallel_research -> critic -> [targeted_research -> critic]* -> writer -> memory_storage -> END
 ```
 
 Rejected workflows route from `human_approval` directly to `END`.
@@ -352,7 +381,7 @@ TAVILY_API_KEY=your_tavily_key_here
 
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/nexus
 LANGSMITH_API_KEY=
-LANGSMITH_PROJECT=nexus-phase3
+LANGSMITH_PROJECT=nexus-phase4
 ENVIRONMENT=development
 API_BASE_URL=http://localhost:8000
 ```
@@ -435,6 +464,12 @@ Run Phase 3 tests:
 
 ```powershell
 python -m pytest backend/tests/test_phase3.py -q
+```
+
+Run Phase 4 tests:
+
+```powershell
+python -m pytest backend/tests/test_phase4.py -q
 ```
 
 Tests mock model, embedding, Tavily, and database boundaries where appropriate.

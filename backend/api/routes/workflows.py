@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi.responses import Response
 from langgraph.types import Command
 
 from backend.db.connection import execute_query, fetch_rows, get_pool
@@ -17,11 +18,14 @@ from backend.schemas.api import (
 )
 from backend.schemas.workflow import (
     AgentMessage,
+    CriticReport,
+    FinalReport,
     ResearchResult,
     WorkflowPlan,
     WorkflowState,
     serialize_workflow_state,
 )
+from backend.agents.writer import render_final_report_markdown
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
 
@@ -39,6 +43,9 @@ async def create_workflow(
         "plan": None,
         "research_results": [],
         "memory_context": "",
+        "critic_reports": [],
+        "critic_iteration": 0,
+        "final_report": None,
         "draft": None,
         "final_output": None,
         "messages": [],
@@ -158,8 +165,37 @@ async def get_workflow_status(
         status=state.get("status", "unknown"),
         plan=_coerce_plan(state.get("plan")),
         research_results=_coerce_research_results(state.get("research_results", [])),
+        critic_reports=_coerce_critic_reports(state.get("critic_reports", [])),
+        final_report=_coerce_final_report(state.get("final_report")),
         final_output=state.get("final_output"),
         state=serialize_workflow_state(state),
+    )
+
+
+@router.get("/{run_id}/report", response_model=FinalReport)
+async def get_workflow_report(
+    run_id: UUID,
+    _pool: asyncpg.Pool = Depends(get_pool),
+) -> FinalReport:
+    state = await _load_state(run_id)
+    final_report = _coerce_final_report(state.get("final_report"))
+    if final_report is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workflow report is not available yet.",
+        )
+    return final_report
+
+
+@router.get("/{run_id}/report.md")
+async def get_workflow_report_markdown(
+    run_id: UUID,
+    _pool: asyncpg.Pool = Depends(get_pool),
+) -> Response:
+    final_report = await get_workflow_report(run_id, _pool)
+    return Response(
+        content=render_final_report_markdown(final_report),
+        media_type="text/markdown",
     )
 
 
@@ -288,6 +324,23 @@ def _coerce_research_results(value: Any) -> list[ResearchResult]:
         item if isinstance(item, ResearchResult) else ResearchResult.model_validate(item)
         for item in value
     ]
+
+
+def _coerce_critic_reports(value: Any) -> list[CriticReport]:
+    if not isinstance(value, list):
+        return []
+    return [
+        item if isinstance(item, CriticReport) else CriticReport.model_validate(item)
+        for item in value
+    ]
+
+
+def _coerce_final_report(value: Any) -> FinalReport | None:
+    if value is None:
+        return None
+    if isinstance(value, FinalReport):
+        return value
+    return FinalReport.model_validate(value)
 
 
 def _failed_state(state: WorkflowState, exc: Exception) -> WorkflowState:

@@ -77,6 +77,7 @@ def reset_workflow() -> None:
     st.session_state.plan = None
     st.session_state.status = None
     st.session_state.final_output = None
+    st.session_state.final_report = None
 
 
 def render_plan(plan: dict[str, Any]) -> None:
@@ -102,6 +103,76 @@ def render_research_results(results: list[dict[str, Any]]) -> None:
         with st.expander(f"{score}/10 - {title}", expanded=False):
             st.caption(url)
             st.write(result.get("content", "")[:1200])
+
+
+def render_critic_reports(reports: list[dict[str, Any]]) -> None:
+    if not reports:
+        return
+
+    latest = reports[-1]
+    findings = latest.get("findings", [])
+    iteration = latest.get("iteration", len(reports))
+    st.write(f"Critic: **Iteration {iteration}/3** - **{len(findings)}** issues found")
+    if not findings:
+        st.success(latest.get("recommendation", "Research quality passed."))
+        return
+
+    with st.expander("Critic findings", expanded=not latest.get("passed", False)):
+        for finding in findings:
+            severity = finding.get("severity", "low")
+            message = (
+                f"**{severity.upper()}** "
+                f"{finding.get('finding_type', 'finding')} - "
+                f"{finding.get('description', '')}"
+            )
+            if severity == "high":
+                st.error(message)
+            elif severity == "medium":
+                st.warning(message)
+            else:
+                st.info(message)
+            affected = finding.get("affected_tasks", [])
+            if affected:
+                st.caption("Affected tasks: " + ", ".join(affected))
+
+
+def render_final_report(report: dict[str, Any]) -> None:
+    score = float(report.get("confidence_score", 0))
+    color = "#1f9d55" if score > 0.7 else "#b7791f" if score >= 0.4 else "#c53030"
+    st.markdown(
+        f"""
+        <div style="display:inline-block;padding:0.25rem 0.6rem;border-radius:999px;
+        background:{color};color:white;font-weight:700;margin-bottom:0.75rem;">
+        Confidence {score:.2f}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.title(report.get("title", "Final Report"))
+    st.info(report.get("executive_summary", ""))
+
+    for section in report.get("sections", []):
+        st.header(section.get("title", "Section"))
+        st.markdown(
+            _format_inline_citations(section.get("content", "")),
+            unsafe_allow_html=True,
+        )
+
+    citations = report.get("all_citations", [])
+    if citations:
+        st.divider()
+        st.subheader("References")
+        for citation in sorted(citations, key=lambda item: item.get("index", 0)):
+            st.markdown(
+                f"[{citation.get('index')}] "
+                f"**{citation.get('title') or citation.get('url')}**  \n"
+                f"{citation.get('url')}  \n"
+                f"> {citation.get('quote', '')}"
+            )
+
+
+def _format_inline_citations(content: str) -> str:
+    return content.replace("[", "<sup>[").replace("]", "]</sup>")
 
 
 def render_memory_results(results: list[dict[str, Any]]) -> None:
@@ -146,6 +217,7 @@ for key, default in {
     "plan": None,
     "status": None,
     "final_output": None,
+    "final_report": None,
     "selected_project_id": None,
 }.items():
     if key not in st.session_state:
@@ -233,12 +305,17 @@ if st.session_state.run_id:
             "planning": 0.1,
             "awaiting_approval": 0.25,
             "researching": 0.6,
+            "criticizing": 0.75,
+            "targeted_research": 0.78,
+            "writing": 0.9,
             "completed": 1.0,
             "rejected": 1.0,
             "failed": 1.0,
         }.get(st.session_state.status, 0.2)
         st.progress(progress)
         st.write(f"Status: **{st.session_state.status}**")
+        critic_reports = workflow.get("critic_reports", [])
+        render_critic_reports(critic_reports)
 
         if st.session_state.plan:
             render_plan(st.session_state.plan)
@@ -257,10 +334,20 @@ if st.session_state.run_id:
                     st.rerun()
 
         research_results = workflow.get("research_results", [])
-        if st.session_state.status in {"researching", "completed"}:
+        if st.session_state.status in {
+            "researching",
+            "criticizing",
+            "targeted_research",
+            "writing",
+            "completed",
+        }:
             render_research_results(research_results)
 
-        if st.session_state.status == "completed" and st.session_state.final_output:
+        final_report = workflow.get("final_report")
+        if st.session_state.status == "completed" and final_report:
+            st.divider()
+            render_final_report(final_report)
+        elif st.session_state.status == "completed" and st.session_state.final_output:
             st.divider()
             st.markdown(st.session_state.final_output)
         elif st.session_state.status == "failed":
@@ -268,7 +355,12 @@ if st.session_state.run_id:
             st.error(state.get("final_output", "Workflow failed."))
         elif st.session_state.status == "rejected":
             st.warning("Workflow rejected.")
-        elif st.session_state.status == "researching":
+        elif st.session_state.status in {
+            "researching",
+            "criticizing",
+            "targeted_research",
+            "writing",
+        }:
             time.sleep(2)
             st.rerun()
     except httpx.HTTPError as exc:

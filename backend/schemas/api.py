@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from backend.schemas.workflow import ResearchResult, WorkflowPlan
+from backend.schemas.workflow import CriticReport, FinalReport, ResearchResult, WorkflowPlan
 
 
 class WorkflowCreateRequest(BaseModel):
@@ -29,6 +29,8 @@ class WorkflowStatusResponse(BaseModel):
     status: str
     plan: WorkflowPlan | None = None
     research_results: list[ResearchResult] = Field(default_factory=list)
+    critic_reports: list[CriticReport] = Field(default_factory=list)
+    final_report: FinalReport | None = None
     final_output: str | None = None
     state: dict[str, Any]
 

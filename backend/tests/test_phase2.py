@@ -7,6 +7,7 @@ from langgraph.types import Command
 from pydantic import SecretStr
 
 import backend.agents.research as research_module
+from backend.agents.critic import CriticAgent
 from backend.agents.memory_agent import MemoryAgent
 from backend.agents.planner import PlannerAgent
 from backend.agents.research import ResearchAgent
@@ -17,6 +18,7 @@ from backend.schemas.workflow import (
     ResearchResult,
     ResearchTask,
     SearchResult,
+    CriticReport,
     WorkflowPlan,
     WorkflowState,
 )
@@ -41,6 +43,9 @@ def phase2_state() -> WorkflowState:
         ),
         "research_results": [],
         "memory_context": "",
+        "critic_reports": [],
+        "critic_iteration": 0,
+        "final_report": None,
         "draft": None,
         "final_output": None,
         "messages": [],
@@ -146,6 +151,16 @@ async def test_human_approval_interrupt_pauses_and_resumes(
         updated["status"] = "completed"
         return updated
 
+    async def fake_critic_run(self, state: WorkflowState) -> CriticReport:
+        report = CriticReport(
+            passed=True,
+            findings=[],
+            recommendation="Research is acceptable.",
+            iteration=state.get("critic_iteration", 1),
+        )
+        state["critic_reports"] = [report]
+        return report
+
     async def fake_retrieve_context(*args, **kwargs) -> str:
         return ""
 
@@ -157,6 +172,7 @@ async def test_human_approval_interrupt_pauses_and_resumes(
 
     monkeypatch.setattr(PlannerAgent, "run", fake_planner_run)
     monkeypatch.setattr(ResearchAgent, "run", fake_research_run)
+    monkeypatch.setattr(CriticAgent, "run", fake_critic_run)
     monkeypatch.setattr(WriterAgent, "run", fake_writer_run)
     monkeypatch.setattr(MemoryAgent, "retrieve_context", fake_retrieve_context)
     monkeypatch.setattr(MemoryStore, "store_research_results", fake_store_research_results)

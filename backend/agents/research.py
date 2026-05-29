@@ -1,4 +1,5 @@
 import asyncio
+import json
 import re
 from typing import Any
 
@@ -8,7 +9,12 @@ from langsmith import traceable
 
 from backend.agents.base import BaseAgent
 from backend.config import settings
-from backend.schemas.workflow import ResearchResult, ResearchTask, SearchResult
+from backend.schemas.workflow import (
+    CriticFinding,
+    ResearchResult,
+    ResearchTask,
+    SearchResult,
+)
 
 try:
     from tavily import AsyncTavilyClient
@@ -82,10 +88,34 @@ class ResearchAgent(BaseAgent):
 
     @traceable(name="ResearchAgent.run")
     async def run(self, task: ResearchTask) -> list[ResearchResult]:
+        return await self._collect_results(task, task.search_queries)
+
+    @traceable(name="ResearchAgent.targeted_research")
+    async def targeted_research(
+        self,
+        task: ResearchTask,
+        findings: list[CriticFinding],
+    ) -> list[ResearchResult]:
+        relevant_findings = [
+            finding
+            for finding in findings
+            if not finding.affected_tasks or task.id in finding.affected_tasks
+        ]
+        if not relevant_findings:
+            return []
+
+        queries = await self._generate_targeted_queries(task, relevant_findings)
+        return await self._collect_results(task, queries)
+
+    async def _collect_results(
+        self,
+        task: ResearchTask,
+        queries: list[str],
+    ) -> list[ResearchResult]:
         seen_urls: set[str] = set()
         collected: list[ResearchResult] = []
 
-        for query in task.search_queries:
+        for query in queries:
             search_results = await self.tavily_search(query)
             for search_result in search_results[:2]:
                 if search_result.url in seen_urls:
@@ -115,6 +145,44 @@ class ResearchAgent(BaseAgent):
                 )
 
         return sorted(collected, key=lambda item: item.relevance_score, reverse=True)
+
+    async def _generate_targeted_queries(
+        self,
+        task: ResearchTask,
+        findings: list[CriticFinding],
+    ) -> list[str]:
+        fallback_queries = _fallback_targeted_queries(task, findings)
+        try:
+            response = await self._call_model(
+                [
+                    {
+                        "role": "user",
+                        "content": (
+                            "Create focused web search queries to resolve critic "
+                            "findings. Include queries that can confirm, refute, "
+                            "or contextualize the disputed claims. Return JSON only "
+                            "as an array of strings.\n\n"
+                            f"Goal: {self.goal}\n"
+                            f"Research task: {task.model_dump_json()}\n"
+                            "Findings:\n"
+                            + "\n".join(
+                                f"- {finding.finding_type} ({finding.severity}): "
+                                f"{finding.description}"
+                                for finding in findings
+                            )
+                        ),
+                    }
+                ],
+                max_tokens=500,
+                temperature=0.1,
+            )
+            parsed = json.loads(response)
+            if isinstance(parsed, list):
+                queries = [str(item).strip() for item in parsed if str(item).strip()]
+                return _unique_queries([*queries, *fallback_queries])[:6]
+        except Exception:
+            return fallback_queries
+        return fallback_queries
 
     async def _scrape_with_playwright(self, url: str) -> str:
         if async_playwright is None:
@@ -221,3 +289,32 @@ def _is_retryable_tavily_error(exc: Exception) -> bool:
         return True
     message = str(exc).lower()
     return "rate" in message or "timeout" in message or "temporar" in message
+
+
+def _fallback_targeted_queries(
+    task: ResearchTask,
+    findings: list[CriticFinding],
+) -> list[str]:
+    queries: list[str] = []
+    for finding in findings:
+        issue_terms = finding.description[:140]
+        queries.extend(
+            [
+                f"{task.description} {issue_terms} evidence",
+                f"{task.description} {issue_terms} contradiction",
+                f"{task.description} {issue_terms} source verification",
+            ]
+        )
+    return _unique_queries(queries)[:6]
+
+
+def _unique_queries(queries: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for query in queries:
+        normalized = " ".join(query.split())
+        key = normalized.lower()
+        if normalized and key not in seen:
+            seen.add(key)
+            unique.append(normalized)
+    return unique

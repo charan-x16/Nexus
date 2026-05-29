@@ -4,13 +4,14 @@ import pytest
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
+from backend.agents.critic import CriticAgent
 from backend.agents.planner import PlannerAgent
 from backend.agents.research import ResearchAgent
 from backend.agents.writer import WriterAgent
 from backend.graphs.research_graph import build_graph
 from backend.agents.memory_agent import MemoryAgent
 from backend.memory.store import MemoryStore
-from backend.schemas.workflow import ResearchResult, WorkflowPlan, WorkflowState
+from backend.schemas.workflow import CriticReport, FinalReport, ResearchResult, WorkflowPlan, WorkflowState
 
 
 def sample_state() -> WorkflowState:
@@ -20,6 +21,9 @@ def sample_state() -> WorkflowState:
         "plan": None,
         "research_results": [],
         "memory_context": "",
+        "critic_reports": [],
+        "critic_iteration": 0,
+        "final_report": None,
         "draft": None,
         "final_output": None,
         "messages": [],
@@ -64,7 +68,36 @@ async def test_writer_agent_produces_non_empty_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_call_model(*args, **kwargs) -> str:
-        return "# pgvector Semantic Search Brief\n\nUse pgvector when embeddings belong close to relational data."
+        return json.dumps(
+            {
+                "title": "pgvector Semantic Search Brief",
+                "executive_summary": "pgvector keeps embeddings close to PostgreSQL data [1].",
+                "sections": [
+                    {
+                        "title": "Recommendation",
+                        "content": "Use pgvector when embeddings belong close to relational data [1].",
+                        "citations": [
+                            {
+                                "index": 1,
+                                "url": "https://example.com/pgvector",
+                                "title": "pgvector",
+                                "quote": "pgvector stores embeddings in PostgreSQL.",
+                            }
+                        ],
+                    }
+                ],
+                "all_citations": [
+                    {
+                        "index": 1,
+                        "url": "https://example.com/pgvector",
+                        "title": "pgvector",
+                        "quote": "pgvector stores embeddings in PostgreSQL.",
+                    }
+                ],
+                "confidence_score": 0.8,
+                "generated_at": "2026-05-29T00:00:00Z",
+            }
+        )
 
     monkeypatch.setattr(WriterAgent, "_call_model", fake_call_model)
     state = sample_state()
@@ -94,8 +127,8 @@ async def test_writer_agent_produces_non_empty_output(
 
     result = await WriterAgent().run(state)
 
-    assert result["final_output"]
-    assert "pgvector" in result["final_output"]
+    assert isinstance(result, FinalReport)
+    assert "pgvector" in result.executive_summary
 
 
 @pytest.mark.asyncio
@@ -139,6 +172,16 @@ async def test_graph_runs_end_to_end_after_mock_approval(
         updated["status"] = "completed"
         return updated
 
+    async def fake_critic_run(self, state: WorkflowState) -> CriticReport:
+        report = CriticReport(
+            passed=True,
+            findings=[],
+            recommendation="Research is acceptable.",
+            iteration=state.get("critic_iteration", 1),
+        )
+        state["critic_reports"] = [report]
+        return report
+
     async def fake_retrieve_context(*args, **kwargs) -> str:
         return ""
 
@@ -150,6 +193,7 @@ async def test_graph_runs_end_to_end_after_mock_approval(
 
     monkeypatch.setattr(PlannerAgent, "run", fake_planner_run)
     monkeypatch.setattr(ResearchAgent, "run", fake_research_run)
+    monkeypatch.setattr(CriticAgent, "run", fake_critic_run)
     monkeypatch.setattr(WriterAgent, "run", fake_writer_run)
     monkeypatch.setattr(MemoryAgent, "retrieve_context", fake_retrieve_context)
     monkeypatch.setattr(MemoryStore, "store_research_results", fake_store_research_results)

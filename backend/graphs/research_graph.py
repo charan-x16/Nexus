@@ -6,14 +6,18 @@ from uuid import UUID
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
+from backend.agents.critic import CriticAgent
 from backend.agents.memory_agent import MemoryAgent
 from backend.agents.planner import PlannerAgent
 from backend.agents.research import ResearchAgent
-from backend.agents.writer import WriterAgent
+from backend.agents.writer import WriterAgent, render_final_report_markdown
 from backend.db.checkpointer import get_checkpointer
 from backend.db.connection import execute_query
 from backend.memory.store import MemoryStore
 from backend.schemas.workflow import (
+    AgentMessage,
+    CriticReport,
+    FinalReport,
     ResearchResult,
     ResearchTask,
     WorkflowPlan,
@@ -23,6 +27,7 @@ from backend.schemas.workflow import (
 
 planner_agent = PlannerAgent()
 writer_agent = WriterAgent()
+critic_agent = CriticAgent()
 memory_agent = MemoryAgent()
 memory_store = MemoryStore()
 _compiled_graph: Any | None = None
@@ -115,8 +120,80 @@ async def parallel_research_node(state: WorkflowState) -> WorkflowState:
     return updated_state
 
 
+async def critic_node(state: WorkflowState) -> WorkflowState:
+    updated_state: WorkflowState = dict(state)
+    updated_state["status"] = "criticizing"
+    updated_state["critic_iteration"] = int(state.get("critic_iteration", 0) or 0) + 1
+    await critic_agent.run(updated_state)
+    await _persist_graph_state(updated_state)
+    return updated_state
+
+
+async def targeted_research_node(state: WorkflowState) -> WorkflowState:
+    plan = _coerce_plan(state.get("plan"))
+    if plan is None:
+        raise ValueError("Targeted research requires a workflow plan.")
+
+    critic_reports = _coerce_critic_reports(state.get("critic_reports", []))
+    if not critic_reports:
+        return state
+
+    high_severity_findings = [
+        finding
+        for finding in critic_reports[-1].findings
+        if finding.severity == "high"
+    ]
+    if not high_severity_findings:
+        return state
+
+    goal = state.get("goal", plan.goal)
+    memory_context = state.get("memory_context", "")
+
+    async def run_targeted(task: ResearchTask) -> list[ResearchResult]:
+        agent = ResearchAgent(goal=goal, memory_context=memory_context)
+        return await agent.targeted_research(task, high_severity_findings)
+
+    task_results = await asyncio.gather(
+        *(run_targeted(task) for task in sorted(plan.subtasks, key=lambda item: item.priority)),
+        return_exceptions=True,
+    )
+    new_results: list[ResearchResult] = []
+    for result in task_results:
+        if isinstance(result, Exception):
+            continue
+        new_results.extend(result)
+
+    updated_state: WorkflowState = dict(state)
+    updated_state["status"] = "targeted_research"
+    updated_state["research_results"] = _merge_research_results(
+        _coerce_research_results(state.get("research_results", [])),
+        new_results,
+    )
+    await _persist_graph_state(updated_state)
+    return updated_state
+
+
 async def writer_node(state: WorkflowState) -> WorkflowState:
-    updated_state = await writer_agent.run(state)
+    writer_result = await writer_agent.run(state)
+    if isinstance(writer_result, dict):
+        updated_state: WorkflowState = dict(writer_result)
+    else:
+        final_report = (
+            writer_result
+            if isinstance(writer_result, FinalReport)
+            else FinalReport.model_validate(writer_result)
+        )
+        updated_state = dict(state)
+        updated_state["final_report"] = final_report
+        updated_state["final_output"] = render_final_report_markdown(final_report)
+        updated_state["messages"] = list(state.get("messages", [])) + [
+            AgentMessage(
+                agent="writer",
+                role="assistant",
+                content=final_report.model_dump_json(),
+            )
+        ]
+        updated_state["status"] = "writing"
     await _persist_graph_state(updated_state)
     return updated_state
 
@@ -154,12 +231,24 @@ def route_after_approval(state: WorkflowState) -> str:
     return "rejected" if state.get("status") == "rejected" else "approved"
 
 
+def should_continue(state: WorkflowState) -> str:
+    critic_reports = _coerce_critic_reports(state.get("critic_reports", []))
+    if not critic_reports:
+        return "writer"
+    last_report = critic_reports[-1]
+    if last_report.passed or int(state.get("critic_iteration", 0) or 0) >= 3:
+        return "writer"
+    return "targeted_research"
+
+
 def build_graph(checkpointer: Any) -> Any:
     workflow = StateGraph(WorkflowState)
     workflow.add_node("planner", planner_node)
     workflow.add_node("human_approval", human_approval_node)
     workflow.add_node("memory_retrieval", memory_retrieval_node)
     workflow.add_node("parallel_research", parallel_research_node)
+    workflow.add_node("critic", critic_node)
+    workflow.add_node("targeted_research", targeted_research_node)
     workflow.add_node("writer", writer_node)
     workflow.add_node("memory_storage", memory_storage_node)
     workflow.add_edge(START, "planner")
@@ -173,7 +262,16 @@ def build_graph(checkpointer: Any) -> Any:
         },
     )
     workflow.add_edge("memory_retrieval", "parallel_research")
-    workflow.add_edge("parallel_research", "writer")
+    workflow.add_edge("parallel_research", "critic")
+    workflow.add_conditional_edges(
+        "critic",
+        should_continue,
+        {
+            "targeted_research": "targeted_research",
+            "writer": "writer",
+        },
+    )
+    workflow.add_edge("targeted_research", "critic")
     workflow.add_edge("writer", "memory_storage")
     workflow.add_edge("memory_storage", END)
     return workflow.compile(checkpointer=checkpointer)
@@ -206,6 +304,36 @@ def _coerce_plan(value: Any) -> WorkflowPlan | None:
     if isinstance(value, WorkflowPlan):
         return value
     return WorkflowPlan.model_validate(value)
+
+
+def _coerce_research_results(value: Any) -> list[ResearchResult]:
+    if not isinstance(value, list):
+        return []
+    return [
+        item if isinstance(item, ResearchResult) else ResearchResult.model_validate(item)
+        for item in value
+    ]
+
+
+def _coerce_critic_reports(value: Any) -> list[CriticReport]:
+    if not isinstance(value, list):
+        return []
+    return [
+        item if isinstance(item, CriticReport) else CriticReport.model_validate(item)
+        for item in value
+    ]
+
+
+def _merge_research_results(
+    existing_results: list[ResearchResult],
+    new_results: list[ResearchResult],
+) -> list[ResearchResult]:
+    by_url: dict[str, ResearchResult] = {result.url: result for result in existing_results}
+    for result in new_results:
+        current = by_url.get(result.url)
+        if current is None or result.relevance_score > current.relevance_score:
+            by_url[result.url] = result
+    return sorted(by_url.values(), key=lambda item: item.relevance_score, reverse=True)
 
 
 async def _persist_graph_state(state: WorkflowState) -> None:

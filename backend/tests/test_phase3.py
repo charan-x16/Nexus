@@ -6,6 +6,7 @@ from langgraph.types import Command
 
 import backend.memory.embeddings as embeddings_module
 import backend.memory.store as store_module
+from backend.agents.critic import CriticAgent
 from backend.agents.memory_agent import MemoryAgent
 from backend.agents.planner import PlannerAgent
 from backend.agents.research import ResearchAgent
@@ -13,7 +14,7 @@ from backend.agents.writer import WriterAgent
 from backend.graphs.research_graph import build_graph
 from backend.memory.chunker import chunk_text, estimate_tokens
 from backend.memory.store import MemoryStore
-from backend.schemas.workflow import MemoryChunk, ResearchResult, WorkflowPlan, WorkflowState
+from backend.schemas.workflow import CriticReport, MemoryChunk, ResearchResult, WorkflowPlan, WorkflowState
 
 
 def phase3_state() -> WorkflowState:
@@ -23,6 +24,9 @@ def phase3_state() -> WorkflowState:
         "plan": None,
         "research_results": [],
         "memory_context": "",
+        "critic_reports": [],
+        "critic_iteration": 0,
+        "final_report": None,
         "draft": None,
         "final_output": None,
         "messages": [],
@@ -195,6 +199,16 @@ async def test_full_graph_stores_memory_rows_after_completion(
         updated["status"] = "completed"
         return updated
 
+    async def fake_critic_run(self, state: WorkflowState) -> CriticReport:
+        report = CriticReport(
+            passed=True,
+            findings=[],
+            recommendation="Research is acceptable.",
+            iteration=state.get("critic_iteration", 1),
+        )
+        state["critic_reports"] = [report]
+        return report
+
     async def fake_store_research_results(self, run_id, project_id, results):
         stored_rows.extend(results)
 
@@ -204,6 +218,7 @@ async def test_full_graph_stores_memory_rows_after_completion(
     monkeypatch.setattr(PlannerAgent, "run", fake_planner_run)
     monkeypatch.setattr(MemoryAgent, "retrieve_context", fake_retrieve_context)
     monkeypatch.setattr(ResearchAgent, "run", fake_research_run)
+    monkeypatch.setattr(CriticAgent, "run", fake_critic_run)
     monkeypatch.setattr(WriterAgent, "run", fake_writer_run)
     monkeypatch.setattr(MemoryStore, "store_research_results", fake_store_research_results)
     monkeypatch.setattr(MemoryAgent, "summarise_and_store", fake_summarise_and_store)
