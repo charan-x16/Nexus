@@ -2,31 +2,38 @@
 
 Nexus is an AI Operating System for knowledge work.
 
-The long-term goal is to help a user turn goals into structured work: planning, research, writing, memory, scheduling, and tool execution. The current implementation is Phase 1, which focuses on the smallest useful vertical slice:
+The long-term goal is to help a user turn goals into structured work: planning, research, writing, memory, scheduling, and tool execution.
+
+The current implementation is Phase 2:
 
 ```text
-User Goal -> Planner Agent -> Writer Agent -> Final Markdown Output
+User Goal -> Planner Agent -> Human Approval -> Parallel Research Agents -> Writer Agent -> Final Markdown Output
 ```
-
-Phase 1 gives the project a working backend, frontend, database layer, agent layer, LangGraph workflow, and tests.
 
 ## Current Status
 
-Phase 1 is complete.
+Phase 1 created the first working vertical slice. Phase 2 adds human approval, web research, scraping, parallel agent execution, and durable LangGraph checkpointing.
 
 Nexus can currently:
 
 - Accept a user goal from the Streamlit UI or FastAPI API.
 - Create a project and workflow run in PostgreSQL.
-- Run a LangGraph workflow.
-- Ask a planner agent to convert the goal into a structured task plan.
-- Ask a writer agent to turn the plan into a final markdown report.
+- Ask a planner agent to create a structured research plan.
+- Pause for human approval before research starts.
+- Resume or reject the graph from the approval step.
+- Run research subtasks concurrently.
+- Search the web with Tavily.
+- Scrape source pages with Playwright.
+- Fall back to aiohttp and BeautifulSoup when browser scraping fails.
+- Score research result relevance with the configured OpenRouter model.
+- Ask a writer agent to turn the plan and research into a final markdown report.
 - Save workflow state and agent messages.
-- Let the frontend poll workflow status and render the final output.
+- Let the frontend poll workflow status and render progress.
 
 Detailed phase notes are kept in:
 
 - `docs/phases/phase-1-foundation.md`
+- `docs/phases/phase-2-planner-research-approval.md`
 
 Every major phase or code-flow change should be recorded in `docs/phases/`.
 
@@ -43,7 +50,7 @@ FastAPI Backend
     v
 PostgreSQL
     |
-    | background task starts graph
+    | invoke graph until approval interrupt
     v
 LangGraph Workflow
     |
@@ -53,7 +60,19 @@ PlannerAgent
     |
     | OpenRouter chat completion
     v
-TaskPlan
+WorkflowPlan
+    |
+    | interrupt for human approval
+    v
+Human Approval
+    |
+    | POST /workflows/{run_id}/approve
+    v
+Parallel Research
+    |
+    | Tavily search + Playwright scrape + relevance scoring
+    v
+ResearchResult[]
     |
     | writer node
     v
@@ -67,7 +86,7 @@ Final Markdown Output
     v
 PostgreSQL
     |
-    | GET /workflows/{run_id}
+    | GET /workflows/{run_id}/status
     v
 Streamlit Frontend
 ```
@@ -77,51 +96,61 @@ Streamlit Frontend
 - Python 3.11+
 - FastAPI for the async backend API
 - LangGraph for graph-based agent orchestration
+- LangGraph PostgresSaver for durable graph checkpointing
 - OpenRouter for model access through an OpenAI-compatible chat completions API
+- Tavily for web search
+- Playwright for browser-based scraping
+- aiohttp for scrape fallback
+- BeautifulSoup and lxml for content extraction
 - PostgreSQL for workflow persistence
-- `asyncpg` for async database access
+- asyncpg for async database access
 - Pydantic v2 for schemas and settings
-- `pydantic-settings` for environment configuration
+- pydantic-settings for environment configuration
 - LangSmith tracing decorators on agent methods
-- Streamlit for the first UI
-- Docker Compose for local Postgres, backend, and frontend services
+- Streamlit for the UI
+- Docker Compose for local services
 - Pytest for tests
 
 ## Project Structure
 
 ```text
 backend/
-  main.py                       FastAPI application entrypoint
-  config.py                     Environment settings
+  main.py                         FastAPI application entrypoint
+  config.py                       Environment settings
   agents/
-    base.py                     BaseAgent and OpenRouter model call helper
-    planner.py                  PlannerAgent
-    writer.py                   WriterAgent
+    base.py                       BaseAgent and OpenRouter model call helper
+    planner.py                    PlannerAgent
+    research.py                   ResearchAgent
+    writer.py                     WriterAgent
   api/routes/
-    workflows.py                Workflow API routes
+    workflows.py                  Workflow API routes
   db/
-    connection.py               asyncpg pool and query helpers
-    migrations/001_initial.sql  Initial database schema
+    checkpointer.py               LangGraph PostgresSaver setup
+    connection.py                 asyncpg pool and query helpers
+    migrations/001_initial.sql    Initial database schema
+    migrations/002_phase2_statuses.sql
   graphs/
-    research_graph.py           LangGraph workflow definition
+    research_graph.py             LangGraph workflow definition
   observability/
-    token_tracker.py            Token usage logging
+    token_tracker.py              Token usage logging
   schemas/
-    api.py                      API request/response models
-    workflow.py                 Workflow state and agent models
+    api.py                        API request/response models
+    workflow.py                   Workflow state and agent models
   tests/
-    test_phase1.py              Phase 1 tests
+    test_phase1.py
+    test_phase2.py
 
 frontend/
-  app.py                        Streamlit app
+  app.py                          Streamlit app
 
 docs/phases/
-  phase-1-foundation.md         Phase 1 implementation log
+  phase-1-foundation.md
+  phase-2-planner-research-approval.md
 
-docker-compose.yml              Local services
-requirements.txt                Pinned Python dependencies
-.env.example                    Example environment variables
-main.py                         Convenience backend launcher
+docker-compose.yml
+requirements.txt
+.env.example
+main.py
 ```
 
 ## Backend API
@@ -132,13 +161,13 @@ main.py                         Convenience backend launcher
 GET /health
 ```
 
-Returns backend health and environment.
-
 ### Create Workflow
 
 ```http
 POST /workflows
 ```
+
+Creates the project and workflow run, invokes the graph until the approval interrupt, and returns the generated plan.
 
 Request body:
 
@@ -154,41 +183,55 @@ Response:
 ```json
 {
   "run_id": "uuid",
-  "status": "queued",
+  "status": "awaiting_approval",
+  "plan": {
+    "title": "Plan title",
+    "goal": "User goal",
+    "subtasks": []
+  },
   "output": null
 }
 ```
 
+### Approve Workflow
+
+```http
+POST /workflows/{run_id}/approve
+```
+
+Resumes the graph from the human approval interrupt and starts research in the background.
+
+### Reject Workflow
+
+```http
+POST /workflows/{run_id}/reject
+```
+
+Resumes the graph with rejection and marks the workflow as rejected.
+
 ### Get Workflow Status
 
 ```http
-GET /workflows/{run_id}
+GET /workflows/{run_id}/status
 ```
 
-Returns the workflow status, serialized state, and final markdown output once complete.
+Returns status, plan, research results, final output, and serialized workflow state.
 
 ## Database Schema
 
-The initial migration creates:
+The app stores product workflow data in:
 
 - `projects`
-  - Stores project name and goal.
 - `workflow_runs`
-  - Stores run status and serialized workflow state.
 - `agent_messages`
-  - Stores messages produced by agents during a workflow run.
 
-Migration file:
-
-```text
-backend/db/migrations/001_initial.sql
-```
+LangGraph checkpoint tables are created by `PostgresSaver` during startup.
 
 ## Agent Flow
 
 ### BaseAgent
 
-`BaseAgent` is the shared base class for all agents.
+Shared base class for model-backed agents.
 
 It handles:
 
@@ -205,15 +248,27 @@ Input:
 
 Output:
 
-- `TaskPlan` with title, description, subtasks, and estimated steps.
+- `WorkflowPlan` with title, goal, and prioritized `ResearchTask` items.
+
+### ResearchAgent
+
+Input:
+
+- One `ResearchTask`.
+
+Output:
+
+- Sorted `ResearchResult` records.
+
+It searches Tavily, scrapes top URLs, deduplicates by URL, and scores source relevance.
 
 ### WriterAgent
 
 Input:
 
 - User goal.
-- Planner output.
-- Available research context.
+- Approved workflow plan.
+- Research results.
 
 Output:
 
@@ -221,7 +276,7 @@ Output:
 
 ## LangGraph Workflow
 
-The Phase 1 graph is defined in:
+Defined in:
 
 ```text
 backend/graphs/research_graph.py
@@ -230,16 +285,16 @@ backend/graphs/research_graph.py
 Current graph:
 
 ```text
-START -> planner -> writer -> END
+START -> planner -> human_approval -> parallel_research -> writer -> END
 ```
 
-The graph is compiled with `MemorySaver` as the checkpointer for now.
+Rejected workflows route from `human_approval` directly to `END`.
 
 ## Environment Variables
 
 Create a `.env` file from `.env.example`.
 
-For running backend locally with Postgres exposed on `localhost:5432`:
+For running the backend locally with Postgres exposed on `localhost:5432`:
 
 ```env
 OPENROUTER_API_KEY=your_openrouter_key_here
@@ -247,15 +302,16 @@ OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 OPENROUTER_MODEL=anthropic/claude-sonnet-4
 OPENROUTER_APP_NAME=Nexus
 OPENROUTER_SITE_URL=http://localhost:8501
+TAVILY_API_KEY=your_tavily_key_here
 
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/nexus
 LANGSMITH_API_KEY=
-LANGSMITH_PROJECT=nexus-phase1
+LANGSMITH_PROJECT=nexus-phase2
 ENVIRONMENT=development
 API_BASE_URL=http://localhost:8000
 ```
 
-When running the backend inside Docker Compose, the app uses the Docker service hostname:
+When running the backend inside Docker Compose, use the Docker service hostname:
 
 ```env
 DATABASE_URL=postgresql://postgres:postgres@postgres:5432/nexus
@@ -269,7 +325,13 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
-Start Postgres with Docker:
+Install Playwright browser binaries:
+
+```powershell
+python -m playwright install chromium
+```
+
+Start Postgres:
 
 ```powershell
 docker compose up -d postgres
@@ -311,13 +373,19 @@ Services:
 
 ## Tests
 
-Run Phase 1 tests:
+Run Phase 1 compatibility tests:
 
 ```powershell
 python -m pytest backend/tests/test_phase1.py -q
 ```
 
-The Phase 1 tests mock model calls, so they do not require a real OpenRouter API call.
+Run Phase 2 tests:
+
+```powershell
+python -m pytest backend/tests/test_phase2.py -q
+```
+
+Tests mock model and Tavily calls, so they do not require real OpenRouter or Tavily API calls.
 
 ## Documentation Rule
 
@@ -327,5 +395,3 @@ For every major change in project behavior, architecture, workflow, or code flow
 2. Add or update a phase document under `docs/phases/`.
 3. Keep the architecture flow current.
 4. Keep setup commands and environment variables current.
-
-This keeps the project understandable as Nexus grows from a Phase 1 vertical slice into a larger AI operating system.

@@ -1,0 +1,17 @@
+ALTER TABLE workflow_runs
+DROP CONSTRAINT IF EXISTS workflow_runs_status_check;
+
+ALTER TABLE workflow_runs
+ADD CONSTRAINT workflow_runs_status_check
+CHECK (
+    status IN (
+        'queued',
+        'planning',
+        'awaiting_approval',
+        'approved',
+        'researching',
+        'completed',
+        'rejected',
+        'failed'
+    )
+);

@@ -3,6 +3,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from backend.schemas.workflow import ResearchResult, WorkflowPlan
+
 
 class WorkflowCreateRequest(BaseModel):
     goal: str = Field(min_length=1, max_length=8000)
@@ -12,11 +14,19 @@ class WorkflowCreateRequest(BaseModel):
 class WorkflowCreateResponse(BaseModel):
     run_id: UUID
     status: str
+    plan: WorkflowPlan | None = None
     output: str | None = None
+
+
+class WorkflowDecisionResponse(BaseModel):
+    run_id: UUID
+    status: str
 
 
 class WorkflowStatusResponse(BaseModel):
     run_id: UUID
     status: str
+    plan: WorkflowPlan | None = None
+    research_results: list[ResearchResult] = Field(default_factory=list)
     final_output: str | None = None
     state: dict[str, Any]

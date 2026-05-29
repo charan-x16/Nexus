@@ -8,7 +8,18 @@ CREATE TABLE IF NOT EXISTS projects (
 CREATE TABLE IF NOT EXISTS workflow_runs (
     id UUID PRIMARY KEY,
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed')),
+    status TEXT NOT NULL CHECK (
+        status IN (
+            'queued',
+            'planning',
+            'awaiting_approval',
+            'approved',
+            'researching',
+            'completed',
+            'rejected',
+            'failed'
+        )
+    ),
     state JSONB NOT NULL DEFAULT '{}'::JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

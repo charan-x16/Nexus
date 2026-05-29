@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     OPENROUTER_MODEL: str = Field(default="anthropic/claude-sonnet-4", min_length=1)
     OPENROUTER_APP_NAME: str = Field(default="Nexus", min_length=1)
     OPENROUTER_SITE_URL: str = Field(default="http://localhost:8501", min_length=1)
+    TAVILY_API_KEY: SecretStr | None = None
     DATABASE_URL: str = Field(
         default="postgresql://postgres:postgres@localhost:5432/nexus",
         min_length=1,

@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from typing import Any
 
 import httpx
 from langsmith import traceable
@@ -15,7 +16,7 @@ class BaseAgent(ABC):
         self.system_prompt = system_prompt
 
     @abstractmethod
-    async def run(self, state: WorkflowState) -> WorkflowState:
+    async def run(self, *args: Any, **kwargs: Any) -> Any:
         raise NotImplementedError
 
     @traceable(name="BaseAgent._call_model")

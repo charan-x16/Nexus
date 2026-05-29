@@ -2,7 +2,12 @@ from langsmith import traceable
 
 from backend.agents.base import BaseAgent
 from backend.config import settings
-from backend.schemas.workflow import AgentMessage, TaskPlan, WorkflowState
+from backend.schemas.workflow import (
+    AgentMessage,
+    ResearchResult,
+    WorkflowPlan,
+    WorkflowState,
+)
 
 WRITER_SYSTEM_PROMPT = (
     "You are an expert technical writer that synthesises information into "
@@ -27,15 +32,15 @@ class WriterAgent(BaseAgent):
 
         plan = (
             plan_value
-            if isinstance(plan_value, TaskPlan)
-            else TaskPlan.model_validate(plan_value)
+            if isinstance(plan_value, WorkflowPlan)
+            else WorkflowPlan.model_validate(plan_value)
         )
-        research_results = state.get("research_results", [])
-        research_context = (
-            "\n".join(f"- {item}" for item in research_results)
-            if research_results
-            else "- Phase 1 workflow: no external research results were collected."
-        )
+        research_values = state.get("research_results", [])
+        research_results = [
+            item if isinstance(item, ResearchResult) else ResearchResult.model_validate(item)
+            for item in research_values
+        ]
+        research_context = _format_research_context(research_results)
 
         final_output = await self._call_model(
             [
@@ -69,3 +74,23 @@ class WriterAgent(BaseAgent):
         updated_state["messages"] = messages
         updated_state["status"] = "completed"
         return updated_state
+
+
+def _format_research_context(research_results: list[ResearchResult]) -> str:
+    if not research_results:
+        return "- No research results were collected."
+
+    lines: list[str] = []
+    for index, result in enumerate(research_results[:12], start=1):
+        lines.append(
+            "\n".join(
+                [
+                    f"{index}. {result.title or result.url}",
+                    f"   URL: {result.url}",
+                    f"   Query: {result.query}",
+                    f"   Relevance: {result.relevance_score}/10",
+                    f"   Excerpt: {result.content[:900]}",
+                ]
+            )
+        )
+    return "\n\n".join(lines)

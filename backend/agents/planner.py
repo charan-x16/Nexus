@@ -2,15 +2,16 @@ import json
 from typing import Any
 
 from langsmith import traceable
+from pydantic import ValidationError
 
 from backend.agents.base import BaseAgent
 from backend.config import settings
-from backend.schemas.workflow import AgentMessage, TaskPlan, WorkflowState
+from backend.schemas.workflow import AgentMessage, WorkflowPlan, WorkflowState
 
 PLANNER_SYSTEM_PROMPT = (
-    "You are an expert project planner that decomposes user goals into "
-    "structured research and writing tasks. Return concise, valid JSON with "
-    "the keys title, description, subtasks, and estimated_steps."
+    "You are an expert research planner for knowledge work. Decompose user "
+    "goals into prioritized research subtasks. Return valid JSON only. Do "
+    "not include markdown, commentary, or code fences."
 )
 
 
@@ -28,23 +29,12 @@ class PlannerAgent(BaseAgent):
             raise ValueError("Workflow goal is required.")
 
         response_text = await self._call_model(
-            [
-                {
-                    "role": "user",
-                    "content": (
-                        "Create a project plan for this user goal. "
-                        "Return only a JSON object with this shape: "
-                        '{"title": "string", "description": "string", '
-                        '"subtasks": ["string"], "estimated_steps": 1}.\n\n'
-                        f"Goal: {goal}"
-                    ),
-                }
-            ],
-            max_tokens=1200,
+            [_planner_prompt(goal)],
+            max_tokens=1800,
             temperature=0.1,
         )
+        plan = await self._parse_with_single_retry(goal, response_text)
 
-        plan = TaskPlan.model_validate(_parse_json_object(response_text))
         messages = list(state.get("messages", []))
         messages.append(
             AgentMessage(
@@ -57,8 +47,60 @@ class PlannerAgent(BaseAgent):
         updated_state: WorkflowState = dict(state)
         updated_state["plan"] = plan
         updated_state["messages"] = messages
-        updated_state["status"] = "planned"
+        updated_state["awaiting_approval"] = True
+        updated_state["status"] = "awaiting_approval"
         return updated_state
+
+    async def _parse_with_single_retry(self, goal: str, response_text: str) -> WorkflowPlan:
+        try:
+            return WorkflowPlan.model_validate(_parse_json_object(response_text))
+        except (json.JSONDecodeError, ValueError, ValidationError) as exc:
+            retry_text = await self._call_model(
+                [
+                    _planner_prompt(goal),
+                    {
+                        "role": "user",
+                        "content": (
+                            "The previous response could not be parsed as the "
+                            "required WorkflowPlan JSON. Return corrected JSON "
+                            f"only. Parser error: {exc}"
+                        ),
+                    },
+                ],
+                max_tokens=1800,
+                temperature=0.0,
+            )
+            return WorkflowPlan.model_validate(_parse_json_object(retry_text))
+
+
+def _planner_prompt(goal: str) -> dict[str, str]:
+    return {
+        "role": "user",
+        "content": (
+            "Create a research workflow plan for the user goal. Return only "
+            "JSON matching this schema:\n"
+            "{\n"
+            '  "title": "short plan title",\n'
+            '  "goal": "original user goal",\n'
+            '  "subtasks": [\n'
+            "    {\n"
+            '      "id": "task-1",\n'
+            '      "description": "specific research task",\n'
+            '      "search_queries": ["precise web search query"],\n'
+            '      "priority": 1,\n'
+            '      "status": "pending"\n'
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
+            "Rules:\n"
+            "- Create 3 to 6 subtasks.\n"
+            "- Each subtask must have 2 to 4 search queries.\n"
+            "- Priority 1 is highest priority.\n"
+            "- Use stable ids like task-1, task-2, task-3.\n"
+            "- Set every status to pending.\n\n"
+            f"User goal: {goal}"
+        ),
+    }
 
 
 def _parse_json_object(text: str) -> dict[str, Any]:

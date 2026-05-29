@@ -5,13 +5,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.routes.workflows import router as workflows_router
 from backend.config import settings
+from backend.db.checkpointer import close_checkpointer, setup_checkpointer
 from backend.db.connection import close_pool, init_pool, run_migrations
 
 
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await init_pool()
     await run_migrations()
+    setup_checkpointer(settings.DATABASE_URL)
     yield
+    close_checkpointer()
     await close_pool()
 
 
